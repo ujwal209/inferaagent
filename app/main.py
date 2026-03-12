@@ -18,5 +18,9 @@ app.include_router(agent_controller.router, prefix="/api/v1")
 async def root():
     return {"status": "online", "message": "Engineering Career API is running"}
 
+@app.get("/health")
+async def health():
+    return {"status": "healthy", "timestamp": "ok"}
+
 if __name__ == "__main__":
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
