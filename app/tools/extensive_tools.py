@@ -5,23 +5,43 @@ import os
 from langchain_community.utilities import SQLDatabase
 from dotenv import load_dotenv
 
+# Load environment
 load_dotenv()
-DATABASE_URL = os.getenv("DATABASE_URL")
-# List specific tables to avoid expensive full database reflection
-RELEVANT_TABLES = [
-    'aicte_branches', 'all_universities', 'branch_categories', 
-    'branch_courses', 'branch_job_roles', 'branch_roadmaps', 
-    'branch_salaries', 'branch_technical_domains', 
-    'engineering_colleges', 'nirf_rankings_engineering', 
-    'nirf_rankings_university'
-]
-db = SQLDatabase.from_uri(DATABASE_URL, include_tables=RELEVANT_TABLES)
+
+_db = None
+
+def get_db():
+    global _db
+    if _db is None:
+        DATABASE_URL = os.getenv("DATABASE_URL")
+        if not DATABASE_URL:
+            raise ValueError("DATABASE_URL environment variable is not set")
+        
+        # List specific tables to avoid expensive full database reflection
+        RELEVANT_TABLES = [
+            'aicte_branches', 'all_universities', 'branch_categories', 
+            'branch_courses', 'branch_job_roles', 'branch_roadmaps', 
+            'branch_salaries', 'branch_technical_domains', 
+            'engineering_colleges', 'nirf_rankings_engineering', 
+            'nirf_rankings_university'
+        ]
+        _db = SQLDatabase.from_uri(
+            DATABASE_URL, 
+            include_tables=RELEVANT_TABLES,
+            engine_args={
+                "connect_args": {
+                    "sslmode": "require",
+                    "connect_timeout": 10
+                }
+            }
+        )
+    return _db
 
 @tool(args_schema=TableNameInput)
 def list_tables() -> str:
     """List all available tables in the database."""
     try:
-        tables = db.get_usable_table_names()
+        tables = get_db().get_usable_table_names()
         return f"Available tables: {', '.join(tables)}"
     except Exception as e:
         return f"Error: {e}"
@@ -30,7 +50,7 @@ def list_tables() -> str:
 def get_table_schema(table_name: str) -> str:
     """Inspect columns and data types for a specific table."""
     try:
-        return db.get_table_info([table_name])
+        return get_db().get_table_info([table_name])
     except Exception as e:
         return f"Error: {e}"
 
@@ -38,73 +58,73 @@ def get_table_schema(table_name: str) -> str:
 def get_branch_details(branch_name: str) -> str:
     """Get the AICTE category and general info for an engineering branch."""
     query = f"SELECT * FROM aicte_branches WHERE branch_name ILIKE '%{branch_name}%';"
-    return str(db.run(query))
+    return str(get_db().run(query))
 
 @tool(args_schema=BranchSearchInput)
 def get_job_roles_by_branch(branch_name: str) -> str:
     """Find specific job roles associated with an engineering branch."""
     query = f"SELECT job_role FROM branch_job_roles WHERE branch_name ILIKE '%{branch_name}%';"
-    return str(db.run(query))
+    return str(get_db().run(query))
 
 @tool(args_schema=BranchSearchInput)
 def get_salary_insights(branch_name: str) -> str:
     """Compare freshers vs experienced salaries for a branch."""
     query = f"SELECT * FROM branch_salaries WHERE branch_name ILIKE '%{branch_name}%';"
-    return str(db.run(query))
+    return str(get_db().run(query))
 
 @tool(args_schema=BranchSearchInput)
 def get_technical_domains(branch_name: str) -> str:
     """List the important technical domains for a branch."""
     query = f"SELECT technical_domains FROM branch_technical_domains WHERE branch_name ILIKE '%{branch_name}%';"
-    return str(db.run(query))
+    return str(get_db().run(query))
 
 @tool(args_schema=BranchSearchInput)
 def get_career_roadmaps(branch_name: str) -> str:
     """Get project ideas and internship preparation tips for a branch."""
     query = f"SELECT project_ideas, internship_preparation FROM branch_roadmaps WHERE branch_name ILIKE '%{branch_name}%';"
-    return str(db.run(query))
+    return str(get_db().run(query))
 
 @tool(args_schema=BranchSearchInput)
 def get_courses_by_branch(branch_name: str) -> str:
     """Find recommended courses for a specific engineering branch."""
     query = f"SELECT course_name, platform, job_role, course_link FROM branch_courses WHERE branch_name ILIKE '%{branch_name}%' LIMIT 50;"
-    return str(db.run(query))
+    return str(get_db().run(query))
 
 @tool(args_schema=PlatformSearchInput)
 def get_courses_by_platform(platform: str) -> str:
     """Find all courses available on a specific platform."""
     query = f"SELECT course_name, branch_name, job_role, course_link FROM branch_courses WHERE platform ILIKE '%{platform}%' LIMIT 50;"
-    return str(db.run(query))
+    return str(get_db().run(query))
 
 @tool(args_schema=JobRoleSearchInput)
 def get_courses_by_job_role(job_role: str) -> str:
     """Find courses tailored for a specific career or job role."""
     query = f"SELECT course_name, platform, branch_name, course_link FROM branch_courses WHERE job_role ILIKE '%{job_role}%' LIMIT 50;"
-    return str(db.run(query))
+    return str(get_db().run(query))
 
 @tool(args_schema=CourseSearchInput)
 def search_courses_by_keyword(keyword: str) -> str:
     """Search for courses by keyword."""
     query = f"SELECT course_name, platform, branch_name, job_role, course_link FROM branch_courses WHERE course_name ILIKE '%{keyword}%' LIMIT 50;"
-    return str(db.run(query))
+    return str(get_db().run(query))
 
 @tool
 def list_all_course_platforms() -> str:
     """List all available course platforms (Coursera, Udemy, etc.)."""
     query = "SELECT DISTINCT platform FROM branch_courses WHERE platform IS NOT NULL;"
-    return str(db.run(query))
+    return str(get_db().run(query))
 
 @tool(args_schema=StateSearchInput)
 def find_colleges_by_state(state: str) -> str:
     """Search for engineering colleges in a specific state."""
     query = f"SELECT name, website FROM engineering_colleges WHERE state ILIKE '%{state}%' LIMIT 100;"
-    return str(db.run(query))
+    return str(get_db().run(query))
 
 @tool(args_schema=CollegeSearchInput)
 def get_college_info(college_name: str) -> str:
     """Get AISHE code, state, and website for a specific college."""
     query = f"SELECT * FROM engineering_colleges WHERE name ILIKE '%{college_name}%';"
-    return str(db.run(query))
+    return str(get_db().run(query))
 
 @tool(args_schema=RankingSearchInput)
 def get_engineering_rankings(state: Optional[str] = None, limit: int = 50) -> str:
@@ -112,7 +132,7 @@ def get_engineering_rankings(state: Optional[str] = None, limit: int = 50) -> st
     try:
         state_clause = f"WHERE state ILIKE '%{state}%'" if state else ""
         query = f"SELECT rank, name, city, state FROM nirf_rankings_engineering {state_clause} ORDER BY CAST(rank AS INTEGER) ASC LIMIT {limit};"
-        return str(db.run(query))
+        return str(get_db().run(query))
     except Exception as e:
         return f"Error: {e}"
 
@@ -122,7 +142,7 @@ def get_university_rankings(state: Optional[str] = None, limit: int = 50) -> str
     try:
         state_clause = f"WHERE state ILIKE '%{state}%'" if state else ""
         query = f"SELECT ranking, name, city, state FROM nirf_rankings_university {state_clause} ORDER BY CAST(ranking AS INTEGER) ASC LIMIT {limit};"
-        return str(db.run(query))
+        return str(get_db().run(query))
     except Exception as e:
         return f"Error: {e}"
 
@@ -131,7 +151,7 @@ def get_university_info(name: str) -> str:
     """Get detailed info about a university including AISHE code, website, and location."""
     try:
         query = f"SELECT * FROM all_universities WHERE name ILIKE '%{name}%' LIMIT 10;"
-        return str(db.run(query))
+        return str(get_db().run(query))
     except Exception as e:
         return f"Error: {e}"
 
@@ -140,7 +160,7 @@ def get_branches_by_category(category_name: str) -> str:
     """Find all engineering branches belonging to a specific category (e.g., 'Information Technology')."""
     try:
         query = f"SELECT branch_name FROM aicte_branches WHERE category ILIKE '%{category_name}%' LIMIT 100;"
-        return str(db.run(query))
+        return str(get_db().run(query))
     except Exception as e:
         return f"Error: {e}"
 
@@ -168,7 +188,7 @@ def get_top_paying_branches(min_salary_lpa: float = 8.0) -> str:
     try:
         # Salaries are stored as text (e.g., '10-12'), so we cast/parse. This uses a standard SQL trick.
         query = f"SELECT branch_name, freshers_salary_lpa, experienced_salary_lpa FROM branch_salaries WHERE CAST(SUBSTRING(freshers_salary_lpa FROM '^[0-9.]+') AS FLOAT) >= {min_salary_lpa} ORDER BY CAST(SUBSTRING(freshers_salary_lpa FROM '^[0-9.]+') AS FLOAT) DESC LIMIT 20;"
-        return str(db.run(query))
+        return str(get_db().run(query))
     except Exception as e:
         return f"Error: {e}"
 
@@ -177,7 +197,7 @@ def get_international_salary_insights(branch_name: str) -> str:
     """Get international salary data (USD) and source links for a specific branch."""
     try:
         query = f"SELECT branch_name, international_salary_usd, international_salary_source FROM branch_salaries WHERE branch_name ILIKE '%{branch_name}%' AND international_salary_usd IS NOT NULL;"
-        return str(db.run(query))
+        return str(get_db().run(query))
     except Exception as e:
         return f"Error: {e}"
 
@@ -192,7 +212,7 @@ def compare_two_branches(branch_a: str, branch_b: str) -> str:
         LEFT JOIN branch_roadmaps r ON s.branch_name = r.branch_name
         WHERE s.branch_name ILIKE '%{branch_a}%' OR s.branch_name ILIKE '%{branch_b}%';
         """
-        return str(db.run(query))
+        return str(get_db().run(query))
     except Exception as e:
         return f"Error: {e}"
 
@@ -202,9 +222,9 @@ def find_colleges_by_city(city: str, state: Optional[str] = None) -> str:
     try:
         state_clause = f"AND state ILIKE '%{state}%'" if state else ""
         query = f"SELECT rank, name, city, state FROM nirf_rankings_engineering WHERE city ILIKE '%{city}%' {state_clause} LIMIT 50;"
-        res_eng = db.run(query)
+        res_eng = get_db().run(query)
         query_uni = f"SELECT ranking, name, city, state FROM nirf_rankings_university WHERE city ILIKE '%{city}%' {state_clause} LIMIT 50;"
-        res_uni = db.run(query_uni)
+        res_uni = get_db().run(query_uni)
         return f"Engineering: {res_eng}\n\nUniversities: {res_uni}"
     except Exception as e:
         return f"Error: {e}"
@@ -214,7 +234,7 @@ def get_universities_by_district(district: str, state: str) -> str:
     """List all universities in a specific district and state."""
     try:
         query = f"SELECT name, website, location FROM all_universities WHERE district ILIKE '%{district}%' AND state ILIKE '%{state}%' LIMIT 50;"
-        return str(db.run(query))
+        return str(get_db().run(query))
     except Exception as e:
         return f"Error: {e}"
 
@@ -223,7 +243,7 @@ def get_branches_by_technical_domain(keyword: str) -> str:
     """Search for engineering branches based on a technical domain keyword (e.g., 'VLSI', 'AI', 'Power')."""
     try:
         query = f"SELECT branch_name, technical_domains FROM branch_technical_domains WHERE technical_domains ILIKE '%{keyword}%' LIMIT 50;"
-        return str(db.run(query))
+        return str(get_db().run(query))
     except Exception as e:
         return f"Error: {e}"
 
