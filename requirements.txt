@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+python-dotenv
+supabase
+langchain
+langchain-core
+langchain-openai
+langchain-community
+langchain-groq
+langgraph
+psycopg2-binary
+sqlalchemy
+watchfiles
+httpx
+pydantic
+pydantic-settings
