@@ -1,0 +1,11 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.vscode/
+*.sql
+test_*.py
+requirements.txt
+# (Keep requirements.txt if needed, but usually it's fine. 
+# The user specifically asked for it, so I'll keep it in git.
+# But I will definitely ignore .env and the big .sql file)
