@@ -1,0 +1,513 @@
+Branch_Name,Job Role
+Aeronautical Engineering,• Aircraft Structural Analysis And Fatigue Study
+Aeronautical Engineering,• Aerodynamics And Propulsion Integration
+Aeronautical Engineering,• Flight Performance Modelling
+Aeronautical Engineering,• Cad For Airframe Design
+Aeronautical Engineering,• Simulation Of Aircraft Control Systems
+Aeronautical Engineering,• Maintenance And Reliability Engineering
+Aeronautical Engineering,• Avionics Interfacing Fundamentals
+Aeronautical Engineering,• Uav Design And Testing
+Agricultural Engineering,• Farm Machinery Design And Operation
+Agricultural Engineering,• Irrigation Engineering And Water Resource Systems
+Agricultural Engineering,• Soil Mechanics And Crop Engineering
+Agricultural Engineering,• Gis And Remote Sensing Tools
+Agricultural Engineering,• Agricultural Automation And Sensors
+Agricultural Engineering,• Farm Energy Systems And Sustainability
+Agricultural Engineering,• Post-Harvest Engineering Technologies
+Agricultural Engineering,• Precision Agriculture Systems
+Artificial Intelligence,• Machine Learning Algorithms And Model Building
+Artificial Intelligence,• Deep Learning Architectures
+Artificial Intelligence,• Natural Language Processing Systems
+Artificial Intelligence,• Computer Vision Pipelines
+Artificial Intelligence,• Data Preprocessing And Feature Engineering
+Artificial Intelligence,• Model Deployment And Mlops Workflows
+Artificial Intelligence,• Gpu-Based Model Training
+Artificial Intelligence,"• Ai Ethics, Evaluation, Optimization"
+Artificial Intelligence And Data Science,• Statistical Modelling And Predictive Analytics
+Artificial Intelligence And Data Science,• Machine Learning Pipelines
+Artificial Intelligence And Data Science,• Data Engineering And Etl Workflows
+Artificial Intelligence And Data Science,• Big Data Platforms And Distributed Processing
+Artificial Intelligence And Data Science,• Deep Learning Frameworks
+Artificial Intelligence And Data Science,• Visualization And Storytelling Tools
+Artificial Intelligence And Data Science,• Cloud-Based Analytics Environments
+Artificial Intelligence And Data Science,• Model Validation And Performance Tuning
+Artificial Intelligence And Machine Learning,• Supervised And Unsupervised Learning
+Artificial Intelligence And Machine Learning,• Neural Networks And Deep Learning
+Artificial Intelligence And Machine Learning,• Reinforcement Learning Fundamentals
+Artificial Intelligence And Machine Learning,• Model Optimization Techniques
+Artificial Intelligence And Machine Learning,• Feature Engineering Pipelines
+Artificial Intelligence And Machine Learning,• Deployment And Inference Systems
+Artificial Intelligence And Machine Learning,• Ai Experimentation Workflows
+Artificial Intelligence And Machine Learning,• Scalable Training Infrastructure
+Automation And Robotics,• Robot Kinematics And Motion Planning
+Automation And Robotics,• Control Systems Engineering
+Automation And Robotics,• Plc And Industrial Automation Systems
+Automation And Robotics,• Robotic Simulation Platforms
+Automation And Robotics,• Sensor Fusion And Perception Systems
+Automation And Robotics,• Actuators And Drive Systems
+Automation And Robotics,• Industrial Robotic Programming
+Automation And Robotics,• Autonomous System Integration
+Automation Engineering,• Industrial Control Theory
+Automation Engineering,• Plc Programming And Ladder Logic
+Automation Engineering,• Scada And Process Automation
+Automation Engineering,• Industrial Communication Protocols
+Automation Engineering,• Sensors And Instrumentation Integration
+Automation Engineering,• Factory Automation Systems
+Automation Engineering,• Process Optimization Techniques
+Automation Engineering,• Maintenance And Reliability Tools
+Automobile Engineering,• Vehicle Dynamics And Chassis Design
+Automobile Engineering,• Internal Combustion Engines And Ev Systems
+Automobile Engineering,• Automotive Electronics And Diagnostics
+Automobile Engineering,• Cad/Cae For Automotive Components
+Automobile Engineering,• Battery Management Systems
+Automobile Engineering,• Emission Control Technologies
+Automobile Engineering,• Testing And Validation Methods
+Automobile Engineering,• Manufacturing Processes In Automotive
+Aviation Engineering,• Aircraft Systems And Operations
+Aviation Engineering,• Navigation And Communication Systems
+Aviation Engineering,• Maintenance And Safety Protocols
+Aviation Engineering,• Aircraft Diagnostics And Inspection Tools
+Aviation Engineering,• Airport Technology Systems
+Aviation Engineering,• Avionics Fundamentals
+Aviation Engineering,• Flight Simulation Environments
+Aviation Engineering,• Aviation Regulatory Standards
+Biomedical Engineering,• Medical Instrumentation Systems
+Biomedical Engineering,• Biomechanics And Prosthetics Design
+Biomedical Engineering,• Biomedical Signal Processing
+Biomedical Engineering,• Medical Imaging Technologies
+Biomedical Engineering,• Device Prototyping Tools
+Biomedical Engineering,• Regulatory And Safety Compliance
+Biomedical Engineering,• Healthcare Data Analysis
+Biomedical Engineering,• Embedded Medical Device Integration
+Biotechnology Engineering,• Molecular Biology And Genetics
+Biotechnology Engineering,• Bioprocess Engineering
+Biotechnology Engineering,• Fermentation Technology
+Biotechnology Engineering,• Bioinformatics Tools And Pipelines
+Biotechnology Engineering,• Cell Culture Techniques
+Biotechnology Engineering,• Pharmaceutical Production Basics
+Biotechnology Engineering,• Lab Instrumentation And Analysis
+Biotechnology Engineering,• Regulatory Compliance In Biotech
+Ceramic Engineering,• Ceramic Material Synthesis
+Ceramic Engineering,• Thermal And Mechanical Property Analysis
+Ceramic Engineering,• Powder Processing Techniques
+Ceramic Engineering,• Material Characterization Tools
+Ceramic Engineering,• High-Temperature Processing Systems
+Ceramic Engineering,• Manufacturing Process Control
+Ceramic Engineering,• Industrial Ceramics Applications
+Ceramic Engineering,• Quality Testing Methods
+Chemical Engineering,• Thermodynamics And Reaction Engineering
+Chemical Engineering,• Process Design And Optimization
+Chemical Engineering,• Fluid Mechanics And Heat Transfer
+Chemical Engineering,• Process Simulation Tools
+Chemical Engineering,• Industrial Safety And Hazard Analysis
+Chemical Engineering,• Chemical Plant Operations
+Chemical Engineering,• Separation Processes
+Chemical Engineering,• Process Control Engineering
+Civil Engineering,• Structural Engineering Fundamentals
+Civil Engineering,• Geotechnical Analysis And Soil Mechanics
+Civil Engineering,• Transportation Engineering Systems
+Civil Engineering,• Surveying And Mapping Tools
+Civil Engineering,• Construction Planning And Management
+Civil Engineering,• Structural Design Software Workflows
+Civil Engineering,• Infrastructure Materials And Testing
+Civil Engineering,• Project Estimation And Site Execution
+Computer Engineering,• Computer Architecture And Organization
+Computer Engineering,• Embedded Systems Design
+Computer Engineering,• Operating Systems Fundamentals
+Computer Engineering,• Networking Protocols
+Computer Engineering,• Hardware–Software Interfacing
+Computer Engineering,• Programming In C/C++ And Python
+Computer Engineering,• Microprocessors And Microcontrollers
+Computer Engineering,• System Performance Optimization
+Computer Science And Business Systems,• Software Engineering Fundamentals
+Computer Science And Business Systems,• Business Analytics And Erp Systems
+Computer Science And Business Systems,• Database Design And Management
+Computer Science And Business Systems,• Full-Stack Development
+Computer Science And Business Systems,• Data-Driven Decision Tools
+Computer Science And Business Systems,• Product Lifecycle Management
+Computer Science And Business Systems,• Cloud Computing Platforms
+Computer Science And Business Systems,• Agile And Project Management Tools
+Computer Science And Design,• Ui/Ux Design Principles
+Computer Science And Design,• Human–Computer Interaction
+Computer Science And Design,• Front-End Development Frameworks
+Computer Science And Design,• Visual Prototyping Tools
+Computer Science And Design,• Product Design Workflows
+Computer Science And Design,• Design Thinking Methodologies
+Computer Science And Design,• Interaction Testing And Evaluation
+Computer Science And Design,• Web/Mobile Interface Development
+Computer Science And Engineering,• Data Structures And Algorithms
+Computer Science And Engineering,• Operating Systems And Dbms
+Computer Science And Engineering,• Computer Networks
+Computer Science And Engineering,• Software Development Lifecycle
+Computer Science And Engineering,• Version Control And Devops Tools
+Computer Science And Engineering,• Full-Stack Application Development
+Computer Science And Engineering,• Cloud Platforms
+Computer Science And Engineering,• System Design And Scalability
+Computer Science And Engineering (Artificial Intelligence),• Machine Learning Pipelines
+Computer Science And Engineering (Artificial Intelligence),• Deep Learning Models
+Computer Science And Engineering (Artificial Intelligence),• Nlp And Computer Vision
+Computer Science And Engineering (Artificial Intelligence),• Ai Deployment Workflows
+Computer Science And Engineering (Artificial Intelligence),• Data Engineering Fundamentals
+Computer Science And Engineering (Artificial Intelligence),• Cloud-Based Ai Systems
+Computer Science And Engineering (Artificial Intelligence),• Model Optimization
+Computer Science And Engineering (Artificial Intelligence),• Ai Product Development
+Computer Science And Engineering (Artificial Intelligence And Machine Learning),• Supervised And Unsupervised Learning
+Computer Science And Engineering (Artificial Intelligence And Machine Learning),• Neural Network Architectures
+Computer Science And Engineering (Artificial Intelligence And Machine Learning),• Reinforcement Learning Basics
+Computer Science And Engineering (Artificial Intelligence And Machine Learning),• Model Evaluation Metrics
+Computer Science And Engineering (Artificial Intelligence And Machine Learning),• Ai Experimentation Pipelines
+Computer Science And Engineering (Artificial Intelligence And Machine Learning),• Distributed Model Training
+Computer Science And Engineering (Artificial Intelligence And Machine Learning),• Data Preprocessing Systems
+Computer Science And Engineering (Artificial Intelligence And Machine Learning),• Ai Deployment Tools
+Computer Science And Engineering (Cyber Security),• Network Security Fundamentals
+Computer Science And Engineering (Cyber Security),• Cryptography And Secure Protocols
+Computer Science And Engineering (Cyber Security),• Ethical Hacking Tools
+Computer Science And Engineering (Cyber Security),• Penetration Testing Methodologies
+Computer Science And Engineering (Cyber Security),• Malware Analysis
+Computer Science And Engineering (Cyber Security),• Digital Forensics Tools
+Computer Science And Engineering (Cyber Security),• Security Operations Workflows
+Computer Science And Engineering (Cyber Security),• Risk And Vulnerability Assessment
+Computer Science And Engineering (Data Science),• Statistical Analysis And Modelling
+Computer Science And Engineering (Data Science),• Machine Learning For Analytics
+Computer Science And Engineering (Data Science),• Data Warehousing
+Computer Science And Engineering (Data Science),• Big Data Ecosystems
+Computer Science And Engineering (Data Science),• Visualization Tools
+Computer Science And Engineering (Data Science),• Feature Engineering Pipelines
+Computer Science And Engineering (Data Science),• Predictive Analytics Workflows
+Computer Science And Engineering (Data Science),• Data Governance And Quality
+Computer Science And Engineering (Internet Of Things),• Embedded Systems Design
+Computer Science And Engineering (Internet Of Things),• Iot Architecture And Protocols
+Computer Science And Engineering (Internet Of Things),• Sensor Networks
+Computer Science And Engineering (Internet Of Things),• Edge Computing Frameworks
+Computer Science And Engineering (Internet Of Things),• Cloud Iot Platforms
+Computer Science And Engineering (Internet Of Things),• Device Security Fundamentals
+Computer Science And Engineering (Internet Of Things),• Real-Time Data Streaming
+Computer Science And Engineering (Internet Of Things),• Iot Application Development
+Computer Science And Engineering (Iot And Cyber Security Including Blockchain),• Iot System Design
+Computer Science And Engineering (Iot And Cyber Security Including Blockchain),• Embedded Device Programming
+Computer Science And Engineering (Iot And Cyber Security Including Blockchain),• Network And Device Security
+Computer Science And Engineering (Iot And Cyber Security Including Blockchain),• Blockchain Fundamentals And Smart Contracts
+Computer Science And Engineering (Iot And Cyber Security Including Blockchain),• Distributed Systems
+Computer Science And Engineering (Iot And Cyber Security Including Blockchain),• Cryptographic Protocols
+Computer Science And Engineering (Iot And Cyber Security Including Blockchain),• Edge Analytics
+Computer Science And Engineering (Iot And Cyber Security Including Blockchain),• Secure Iot Deployment
+Construction Engineering,• Construction Planning And Scheduling
+Construction Engineering,• Building Information Modelling
+Construction Engineering,• Cost Estimation Tools
+Construction Engineering,• Site Management Practices
+Construction Engineering,• Structural Execution Methods
+Construction Engineering,• Safety And Compliance Systems
+Construction Engineering,• Materials And Equipment Management
+Construction Engineering,• Infrastructure Project Workflows
+Data Science,• Statistical Modelling
+Data Science,• Machine Learning Workflows
+Data Science,• Data Visualization Tools
+Data Science,• Data Cleaning And Preprocessing
+Data Science,• Sql And Database Systems
+Data Science,• Predictive Modelling
+Data Science,• Big Data Ecosystems
+Data Science,• Cloud Analytics Platforms
+Electrical And Computer Engineering,• Embedded Systems Integration
+Electrical And Computer Engineering,• Digital Electronics
+Electrical And Computer Engineering,• Microprocessor Systems
+Electrical And Computer Engineering,• Control Systems
+Electrical And Computer Engineering,• Programming For Hardware Systems
+Electrical And Computer Engineering,• Communication Interfaces
+Electrical And Computer Engineering,• Signal Processing Basics
+Electrical And Computer Engineering,• System-On-Chip Concepts
+Electrical And Electronics Engineering,• Power Systems Engineering
+Electrical And Electronics Engineering,• Analog And Digital Electronics
+Electrical And Electronics Engineering,• Control Systems
+Electrical And Electronics Engineering,• Electrical Machines
+Electrical And Electronics Engineering,• Power Electronics
+Electrical And Electronics Engineering,• Circuit Simulation Tools
+Electrical And Electronics Engineering,• Embedded Systems Basics
+Electrical And Electronics Engineering,• Industrial Automation
+Electrical Engineering,• Circuit Analysis
+Electrical Engineering,• Power Generation And Transmission
+Electrical Engineering,• Electrical Machines
+Electrical Engineering,• Protection Systems
+Electrical Engineering,• Grid Technologies
+Electrical Engineering,• Simulation Tools For Power Systems
+Electrical Engineering,• Renewable Energy Systems
+Electrical Engineering,• High-Voltage Engineering
+Electronics And Communication Engineering,• Analog And Digital Communication
+Electronics And Communication Engineering,• Signal Processing Systems
+Electronics And Communication Engineering,• Rf And Microwave Engineering
+Electronics And Communication Engineering,• Embedded Systems
+Electronics And Communication Engineering,• Pcb Design Fundamentals
+Electronics And Communication Engineering,• Communication Protocol Design
+Electronics And Communication Engineering,• Wireless Networks
+Electronics And Communication Engineering,• Optical Communication
+Electronics And Computer Engineering,• Digital System Design
+Electronics And Computer Engineering,• Embedded Computing
+Electronics And Computer Engineering,• Microcontrollers And Processors
+Electronics And Computer Engineering,• Fpga Fundamentals
+Electronics And Computer Engineering,• Communication Interfaces
+Electronics And Computer Engineering,• Real-Time Systems
+Electronics And Computer Engineering,• Hardware Programming
+Electronics And Computer Engineering,• System Integration
+Electronics And Instrumentation Engineering,• Industrial Instrumentation
+Electronics And Instrumentation Engineering,• Sensors And Transducers
+Electronics And Instrumentation Engineering,• Control Systems
+Electronics And Instrumentation Engineering,• Plc And Automation
+Electronics And Instrumentation Engineering,• Process Monitoring Tools
+Electronics And Instrumentation Engineering,• Signal Conditioning Systems
+Electronics And Instrumentation Engineering,• Calibration Techniques
+Electronics And Instrumentation Engineering,• Industrial Communication Protocols
+Electronics And Telecommunication Engineering,• Wireless Communication Systems
+Electronics And Telecommunication Engineering,• Rf Engineering
+Electronics And Telecommunication Engineering,• Optical Fiber Communication
+Electronics And Telecommunication Engineering,• Signal Processing
+Electronics And Telecommunication Engineering,• Network Design Fundamentals
+Electronics And Telecommunication Engineering,• Antenna Systems
+Electronics And Telecommunication Engineering,• Embedded Telecom Systems
+Electronics And Telecommunication Engineering,• Communication Protocol Engineering
+Electronics Engineering,• Analog Electronics
+Electronics Engineering,• Digital Circuit Design
+Electronics Engineering,• Pcb Layout And Testing
+Electronics Engineering,• Embedded Programming
+Electronics Engineering,• Semiconductor Devices
+Electronics Engineering,• Signal Processing
+Electronics Engineering,• Hardware Debugging Tools
+Electronics Engineering,• Consumer Electronics Systems
+Embedded Systems,• Microcontroller Programming
+Embedded Systems,• Real-Time Operating Systems
+Embedded Systems,• Sensor Interfacing
+Embedded Systems,• Communication Protocols
+Embedded Systems,• Embedded C/C++ Development
+Embedded Systems,• Hardware Debugging Tools
+Embedded Systems,• Firmware Development
+Embedded Systems,• Iot Device Integration
+Engineering Physics,• Applied Physics Modelling
+Engineering Physics,• Semiconductor Physics
+Engineering Physics,• Nanotechnology Fundamentals
+Engineering Physics,• Computational Physics Tools
+Engineering Physics,• Materials Characterization
+Engineering Physics,• Photonics And Optics
+Engineering Physics,• Experimental Measurement Systems
+Engineering Physics,• Simulation Workflows
+Environmental Engineering,• Water And Wastewater Treatment
+Environmental Engineering,• Air Pollution Control Systems
+Environmental Engineering,• Environmental Impact Assessment
+Environmental Engineering,• Solid Waste Management
+Environmental Engineering,• Gis And Environmental Modelling
+Environmental Engineering,• Sustainability Frameworks
+Environmental Engineering,• Monitoring And Sensing Tools
+Environmental Engineering,• Climate Technology Systems
+Fire And Safety Engineering,• Fire Protection Systems
+Fire And Safety Engineering,• Hazard Identification
+Fire And Safety Engineering,• Industrial Safety Standards
+Fire And Safety Engineering,• Risk Assessment Tools
+Fire And Safety Engineering,• Emergency Response Planning
+Fire And Safety Engineering,• Safety Audits
+Fire And Safety Engineering,• Fire Dynamics Modelling
+Fire And Safety Engineering,• Safety Compliance Frameworks
+Food Engineering,• Food Processing Systems
+Food Engineering,• Thermal Processing Technologies
+Food Engineering,• Food Packaging Engineering
+Food Engineering,• Quality Assurance Systems
+Food Engineering,• Process Automation In Food Plants
+Food Engineering,• Preservation Technologies
+Food Engineering,• Food Safety Standards
+Food Engineering,• Manufacturing Workflows
+Food Technology,• Food Chemistry
+Food Technology,• Nutrition Science Fundamentals
+Food Technology,• Food Microbiology
+Food Technology,• Processing Techniques
+Food Technology,• Quality Control Tools
+Food Technology,• Packaging Technologies
+Food Technology,• Regulatory Standards
+Food Technology,• Product Development Systems
+Industrial And Production Engineering,• Manufacturing Systems Design
+Industrial And Production Engineering,• Operations Research
+Industrial And Production Engineering,• Supply Chain Management
+Industrial And Production Engineering,• Lean Manufacturing Tools
+Industrial And Production Engineering,• Quality Engineering
+Industrial And Production Engineering,• Production Planning Systems
+Industrial And Production Engineering,• Process Optimization
+Industrial And Production Engineering,• Industrial Automation Basics
+Industrial Engineering,• Operations Research Models
+Industrial Engineering,• Supply Chain Analytics
+Industrial Engineering,• Productivity Tools
+Industrial Engineering,• Systems Optimization
+Industrial Engineering,• Statistical Quality Control
+Industrial Engineering,• Process Improvement Methodologies
+Industrial Engineering,• Project Management Tools
+Industrial Engineering,• Human Factors Engineering
+Information Technology,• Software Development Lifecycle
+Information Technology,• Networking Fundamentals
+Information Technology,• Database Management
+Information Technology,• Cloud Computing Platforms
+Information Technology,• Cybersecurity Basics
+Information Technology,• Web Technologies
+Information Technology,• Devops Workflows
+Information Technology,• System Administration
+Instrumentation And Control Engineering,• Control Theory
+Instrumentation And Control Engineering,• Industrial Instrumentation
+Instrumentation And Control Engineering,• Plc And Scada Systems
+Instrumentation And Control Engineering,• Process Control Design
+Instrumentation And Control Engineering,• Sensors And Actuators
+Instrumentation And Control Engineering,• Automation Integration
+Instrumentation And Control Engineering,• Calibration Tools
+Instrumentation And Control Engineering,• Industrial Communication Networks
+Marine Engineering,• Marine Propulsion Systems
+Marine Engineering,• Ship Machinery Operations
+Marine Engineering,• Marine Electrical Systems
+Marine Engineering,• Maintenance Engineering
+Marine Engineering,• Safety Compliance Systems
+Marine Engineering,• Fluid Mechanics For Ships
+Marine Engineering,• Engine Diagnostics
+Marine Engineering,• Shipboard Automation
+Material Science And Engineering,• Material Properties And Testing
+Material Science And Engineering,• Metallurgy Fundamentals
+Material Science And Engineering,• Composite Materials
+Material Science And Engineering,• Failure Analysis
+Material Science And Engineering,• Material Characterization Tools
+Material Science And Engineering,• Processing Technologies
+Material Science And Engineering,• Nanomaterials Basics
+Material Science And Engineering,• Manufacturing Materials Science
+Mechanical And Automation Engineering,• Mechanical System Design
+Mechanical And Automation Engineering,• Robotics Integration
+Mechanical And Automation Engineering,• Automation Control Systems
+Mechanical And Automation Engineering,• Cad/Cae Tools
+Mechanical And Automation Engineering,• Manufacturing Processes
+Mechanical And Automation Engineering,• Sensors And Actuators
+Mechanical And Automation Engineering,• Industrial Robotics
+Mechanical And Automation Engineering,• Mechatronic System Design
+Mechanical Engineering,• Thermodynamics And Heat Transfer
+Mechanical Engineering,• Mechanics And Machine Design
+Mechanical Engineering,• Manufacturing Processes
+Mechanical Engineering,• Cad/Cae Modelling
+Mechanical Engineering,• Fluid Mechanics
+Mechanical Engineering,• Hvac Systems
+Mechanical Engineering,• Mechatronics Fundamentals
+Mechanical Engineering,• Industrial Engineering Tools
+Mechatronics Engineering,• Embedded Systems
+Mechatronics Engineering,• Control Engineering
+Mechatronics Engineering,• Robotics Design
+Mechatronics Engineering,• Sensors And Actuators
+Mechatronics Engineering,• Mechanical System Modelling
+Mechatronics Engineering,• Automation Integration
+Mechatronics Engineering,• Cad Tools
+Mechatronics Engineering,• Real-Time Systems
+Medical Electronics,• Biomedical Instrumentation
+Medical Electronics,• Medical Imaging Systems
+Medical Electronics,• Signal Processing
+Medical Electronics,• Embedded Medical Devices
+Medical Electronics,• Healthcare Data Systems
+Medical Electronics,• Diagnostic Equipment Tools
+Medical Electronics,• Safety Standards Compliance
+Medical Electronics,• Device Testing Workflows
+Metallurgical Engineering,• Metal Extraction Processes
+Metallurgical Engineering,• Alloy Design
+Metallurgical Engineering,• Heat Treatment Techniques
+Metallurgical Engineering,• Failure Analysis
+Metallurgical Engineering,• Metallography Tools
+Metallurgical Engineering,• Corrosion Engineering
+Metallurgical Engineering,• Process Metallurgy
+Metallurgical Engineering,• Material Testing Systems
+Mining Engineering,• Mine Planning And Design
+Mining Engineering,• Rock Mechanics
+Mining Engineering,• Drilling And Blasting
+Mining Engineering,• Mineral Processing
+Mining Engineering,• Safety Engineering
+Mining Engineering,• Surveying Tools
+Mining Engineering,• Environmental Compliance
+Mining Engineering,• Mining Equipment Systems
+Naval Architecture And Ocean Engineering,• Ship Design Principles
+Naval Architecture And Ocean Engineering,• Hydrodynamics Modelling
+Naval Architecture And Ocean Engineering,• Marine Structures
+Naval Architecture And Ocean Engineering,• Ocean Engineering Systems
+Naval Architecture And Ocean Engineering,• Offshore Structures
+Naval Architecture And Ocean Engineering,• Stability Analysis
+Naval Architecture And Ocean Engineering,• Marine Materials
+Naval Architecture And Ocean Engineering,• Simulation Tools
+Petroleum Engineering,• Reservoir Engineering
+Petroleum Engineering,• Drilling Engineering
+Petroleum Engineering,• Production Engineering
+Petroleum Engineering,• Well Logging Tools
+Petroleum Engineering,• Simulation Of Reservoirs
+Petroleum Engineering,• Fluid Flow Modelling
+Petroleum Engineering,• Safety And Risk Management
+Petroleum Engineering,• Oilfield Technologies
+Petrochemical Engineering,• Refinery Processes
+Petrochemical Engineering,• Process Simulation Tools
+Petrochemical Engineering,• Reaction Engineering
+Petrochemical Engineering,• Industrial Safety
+Petrochemical Engineering,• Separation Processes
+Petrochemical Engineering,• Plant Design
+Petrochemical Engineering,• Process Optimization
+Petrochemical Engineering,• Chemical Plant Operations
+Pharmaceutical Engineering,• Drug Manufacturing Processes
+Pharmaceutical Engineering,• Bioprocess Engineering
+Pharmaceutical Engineering,• Gmp Compliance Systems
+Pharmaceutical Engineering,• Process Validation
+Pharmaceutical Engineering,• Quality Control Tools
+Pharmaceutical Engineering,• Packaging Technologies
+Pharmaceutical Engineering,• Regulatory Frameworks
+Pharmaceutical Engineering,• Production Scale-Up Methods
+Plastic Engineering,• Polymer Processing
+Plastic Engineering,• Injection Moulding Systems
+Plastic Engineering,• Extrusion Technologies
+Plastic Engineering,• Material Testing Tools
+Plastic Engineering,• Cad For Plastic Components
+Plastic Engineering,• Recycling Technologies
+Plastic Engineering,• Manufacturing Process Control
+Plastic Engineering,• Industrial Applications
+Polymer Engineering,• Polymer Chemistry
+Polymer Engineering,• Material Processing
+Polymer Engineering,• Polymer Characterization
+Polymer Engineering,• Compounding Techniques
+Polymer Engineering,• Rheology Fundamentals
+Polymer Engineering,• Manufacturing Technologies
+Polymer Engineering,• Industrial Polymer Systems
+Polymer Engineering,• Testing And Quality Tools
+Power Engineering,• Power Generation Systems
+Power Engineering,• Transmission And Distribution
+Power Engineering,• Protection Systems
+Power Engineering,• Grid Stability Analysis
+Power Engineering,• Renewable Integration
+Power Engineering,• Simulation Tools For Power Flow
+Power Engineering,• Electrical Machines
+Power Engineering,• Energy Management Systems
+Production Engineering,• Manufacturing Systems
+Production Engineering,• Production Planning Tools
+Production Engineering,• Cad/Cam Workflows
+Production Engineering,• Quality Control
+Production Engineering,• Lean Manufacturing
+Production Engineering,• Process Optimization
+Production Engineering,• Industrial Automation Basics
+Production Engineering,• Supply Chain Coordination
+Robotics And Automation,• Robot Kinematics
+Robotics And Automation,• Industrial Automation Systems
+Robotics And Automation,• Control Systems
+Robotics And Automation,• Sensor Integration
+Robotics And Automation,• Motion Planning
+Robotics And Automation,• Plc Systems
+Robotics And Automation,• Autonomous Robotics
+Robotics And Automation,• Simulation Tools
+Safety Engineering,• Hazard Analysis
+Safety Engineering,• Industrial Safety Systems
+Safety Engineering,• Risk Management Frameworks
+Safety Engineering,• Compliance Standards
+Safety Engineering,• Safety Audits
+Safety Engineering,• Emergency Planning
+Safety Engineering,• Process Safety Tools
+Safety Engineering,• Incident Investigation
+Textile Engineering,• Textile Manufacturing Processes
+Textile Engineering,• Fiber Science
+Textile Engineering,• Fabric Design Systems
+Textile Engineering,• Dyeing And Finishing Technologies
+Textile Engineering,• Quality Testing Tools
+Textile Engineering,• Production Machinery
+Textile Engineering,• Apparel Technology Basics
+Textile Engineering,• Industrial Textile Applications
+Vlsi Design And Technology,• Digital Ic Design Fundamentals
+Vlsi Design And Technology,• Analog Ic Design Concepts
+Vlsi Design And Technology,• Semiconductor Device Physics
+Vlsi Design And Technology,• Rtl Design And Verification
+Vlsi Design And Technology,• Fpga Prototyping
+Vlsi Design And Technology,• Physical Design Workflows
+Vlsi Design And Technology,• Timing Analysis
+Vlsi Design And Technology,• Electronic Design Automation Tools

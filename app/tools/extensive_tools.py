@@ -2,6 +2,7 @@ from langchain_core.tools import tool
 from typing import Optional, List, Dict, Any
 from app.models.schemas import *
 import os
+import re
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
@@ -9,375 +10,508 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Initialize Supabase Client
-url: str = os.getenv("SUPABASE_URL")
-key: str = os.getenv("SUPABASE_KEY")
+url: str = os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
+key: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY")
+
 if not url or not key:
-    raise ValueError("SUPABASE_URL or SUPABASE_KEY environment variable is not set")
+    print("CRITICAL WARNING: Supabase Environment Variables are missing!")
+    url = "https://placeholder.supabase.co"
+    key = "placeholder_key"
 
 supabase: Client = create_client(url, key)
 
-# Helper for consistent output format
-def format_results(data: Any) -> str:
+# ==========================================
+# CORE ENGINE HELPERS
+# ==========================================
+
+def format_results(data: Any, tool_name: str = "unknown") -> str:
     if not data:
-        return "No results found."
+        return f"No results found for '{tool_name}'. Please refine your search."
+    
+    if isinstance(data, list):
+        count = len(data)
+        if count > 20:
+            return str(data[:20]) + f"\n\n(Showing top 20 of {count} results found.)"
+    
     return str(data)
 
-# Relevant tables for reference
-RELEVANT_TABLES = [
-    'aicte_branches', 'all_universities', 'branch_categories', 
-    'branch_courses', 'branch_job_roles', 'branch_roadmaps', 
-    'branch_salaries', 'branch_technical_domains', 
-    'engineering_colleges', 'nirf_rankings_engineering', 
-    'nirf_rankings_university'
-]
+BRANCH_ALIAS_MAP = {
+    "cse": "Computer Science and Engineering",
+    "cs": "Computer Science and Engineering",
+    "eee": "Electrical and Electronics Engineering",
+    "ee": "Electrical Engineering",
+    "ece": "Electronics and Communication Engineering",
+    "electronics": "Electronics and Communication Engineering",
+    "it": "Information Technology",
+    "ai": "Artificial Intelligence and Data Science",
+    "ds": "Data Science",
+    "mech": "Mechanical Engineering",
+    "aero": "Aerospace Engineering",
+    "civil": "Civil Engineering",
+    "chem": "Chemical Engineering",
+    "auto": "Automobile Engineering",
+    "biotech": "Biotechnology Engineering",
+    "mining": "Mining Engineering",
+    "marine": "Marine Engineering",
+    "robotics": "Robotics and Automation",
+    "cyber": "Cyber Security",
+    "software": "Software Engineering"
+}
 
-@tool(args_schema=TableNameInput)
-def list_tables() -> str:
-    """List all available tables in the database."""
-    return f"Available tables: {', '.join(RELEVANT_TABLES)}"
+def resolve_branch(name: str) -> str:
+    clean = str(name).lower().strip().replace("engineering", "").strip()
+    return BRANCH_ALIAS_MAP.get(clean, name)
 
-@tool(args_schema=TableNameInput)
-def get_table_schema(table_name: str) -> str:
-    """Inspect columns and data types for a specific table."""
-    # Since we can't easily reflect schema via REST, we use the catalog info
-    catalog = {
-        'aicte_branches': 'branch_name, category',
-        'all_universities': 'aishe_code, name, state, district, website, year_of_establishment, location',
-        'branch_categories': 'category_name',
-        'branch_courses': 'branch_name, job_role, course_name, platform, course_link',
-        'branch_job_roles': 'branch_name, job_role',
-        'branch_roadmaps': 'branch_name, project_ideas, internship_preparation',
-        'branch_salaries': 'branch_name, freshers_salary_lpa, experienced_salary_lpa, salary_source_link, international_salary_usd, international_salary_source',
-        'branch_technical_domains': 'branch_name, technical_domains',
-        'engineering_colleges': 'aishe_code, name, state, website',
-        'nirf_rankings_engineering': 'name, city, state, rank',
-        'nirf_rankings_university': 'name, city, state, ranking'
-    }
-    if table_name in catalog:
-        return f"Table {table_name} columns: {catalog[table_name]}"
-    return f"Error: Table {table_name} not found."
+def db_query(table: str, branch: str = None, col: str = "branch_name", limit: int = 15):
+    """Universal query helper with fuzzy branch support."""
+    try:
+        q = supabase.table(table).select("*")
+        if branch:
+            canonical = resolve_branch(branch)
+            # Use ilike for fuzzy matching on the canonical name
+            q = q.ilike(col, f"%{canonical}%")
+        res = q.order('id').limit(limit).execute()
+        return res.data
+    except Exception as e:
+        return []
+
+# ==========================================
+# 1. BRANCH META TOOLS (6)
+# ==========================================
+
+@tool
+def list_all_branches() -> str:
+    """List every single AICTE recognized engineering branch available in the system."""
+    res = supabase.table('aicte_branches').select('branch_name').order('branch_name').execute()
+    return format_results([r['branch_name'] for r in res.data if r.get('branch_name')], "all_branches")
 
 @tool(args_schema=BranchSearchInput)
 def get_branch_details(branch_name: str) -> str:
-    """Get the AICTE category and general info for an engineering branch."""
-    try:
-        res = supabase.table('aicte_branches').select('*').ilike('branch_name', f'%{branch_name}%').execute()
-        return format_results(res.data)
-    except Exception as e:
-        return f"Error: {e}"
+    """Get the AICTE category and full name of a branch."""
+    return format_results(db_query('aicte_branches', branch_name), "branch_details")
 
 @tool(args_schema=BranchSearchInput)
-def get_job_roles_by_branch(branch_name: str) -> str:
-    """Find specific job roles associated with an engineering branch."""
-    try:
-        res = supabase.table('branch_job_roles').select('job_role').ilike('branch_name', f'%{branch_name}%').execute()
-        return format_results(res.data)
-    except Exception as e:
-        return f"Error: {e}"
-
-@tool(args_schema=BranchSearchInput)
-def get_salary_insights(branch_name: str) -> str:
-    """Compare freshers vs experienced salaries for a branch."""
-    try:
-        res = supabase.table('branch_salaries').select('*').ilike('branch_name', f'%{branch_name}%').execute()
-        return format_results(res.data)
-    except Exception as e:
-        return f"Error: {e}"
-
-@tool(args_schema=BranchSearchInput)
-def get_technical_domains(branch_name: str) -> str:
-    """List the important technical domains for a branch."""
-    try:
-        res = supabase.table('branch_technical_domains').select('technical_domains').ilike('branch_name', f'%{branch_name}%').execute()
-        return format_results(res.data)
-    except Exception as e:
-        return f"Error: {e}"
-
-@tool(args_schema=BranchSearchInput)
-def get_career_roadmaps(branch_name: str) -> str:
-    """Get project ideas and internship preparation tips for a branch."""
-    try:
-        res = supabase.table('branch_roadmaps').select('project_ideas, internship_preparation').ilike('branch_name', f'%{branch_name}%').execute()
-        return format_results(res.data)
-    except Exception as e:
-        return f"Error: {e}"
-
-@tool(args_schema=BranchSearchInput)
-def get_courses_by_branch(branch_name: str) -> str:
-    """Find recommended courses for a specific engineering branch."""
-    try:
-        res = supabase.table('branch_courses').select('course_name, platform, job_role, course_link').ilike('branch_name', f'%{branch_name}%').limit(50).execute()
-        return format_results(res.data)
-    except Exception as e:
-        return f"Error: {e}"
-
-@tool(args_schema=PlatformSearchInput)
-def get_courses_by_platform(platform: str) -> str:
-    """Find all courses available on a specific platform."""
-    try:
-        res = supabase.table('branch_courses').select('course_name, branch_name, job_role, course_link').ilike('platform', f'%{platform}%').limit(50).execute()
-        return format_results(res.data)
-    except Exception as e:
-        return f"Error: {e}"
-
-@tool(args_schema=JobRoleSearchInput)
-def get_courses_by_job_role(job_role: str) -> str:
-    """Find courses tailored for a specific career or job role."""
-    try:
-        res = supabase.table('branch_courses').select('course_name, platform, branch_name, course_link').ilike('job_role', f'%{job_role}%').limit(50).execute()
-        return format_results(res.data)
-    except Exception as e:
-        return f"Error: {e}"
-
-@tool(args_schema=CourseSearchInput)
-def search_courses_by_keyword(keyword: str) -> str:
-    """Search for courses by keyword."""
-    try:
-        res = supabase.table('branch_courses').select('course_name, platform, branch_name, job_role, course_link').ilike('course_name', f'%{keyword}%').limit(50).execute()
-        return format_results(res.data)
-    except Exception as e:
-        return f"Error: {e}"
-
-@tool
-def list_all_course_platforms() -> str:
-    """List all available course platforms (Coursera, Udemy, etc.)."""
-    try:
-        res = supabase.table('branch_courses').select('platform').execute()
-        platforms = sorted(list(set(r['platform'] for r in res.data if r['platform'])))
-        return f"Available platforms: {', '.join(platforms)}"
-    except Exception as e:
-        return f"Error: {e}"
-
-@tool(args_schema=StateSearchInput)
-def find_colleges_by_state(state: str) -> str:
-    """Search for engineering colleges in a specific state."""
-    try:
-        res = supabase.table('engineering_colleges').select('name, website').ilike('state', f'%{state}%').limit(100).execute()
-        return format_results(res.data)
-    except Exception as e:
-        return f"Error: {e}"
-
-@tool(args_schema=CollegeSearchInput)
-def get_college_info(college_name: str) -> str:
-    """Get AISHE code, state, and website for a specific college."""
-    try:
-        res = supabase.table('engineering_colleges').select('*').ilike('name', f'%{college_name}%').execute()
-        return format_results(res.data)
-    except Exception as e:
-        return f"Error: {e}"
-
-@tool(args_schema=RankingSearchInput)
-def get_engineering_rankings(state: Optional[str] = None, limit: int = 50) -> str:
-    """Get the top NIRF-ranked engineering institutions. Optionally filter by state."""
-    try:
-        query = supabase.table('nirf_rankings_engineering').select('rank, name, city, state')
-        if state:
-            query = query.ilike('state', f'%{state}%')
-        res = query.order('rank', desc=False).limit(limit).execute()
-        return format_results(res.data)
-    except Exception as e:
-        return f"Error: {e}"
-
-@tool(args_schema=RankingSearchInput)
-def get_university_rankings(state: Optional[str] = None, limit: int = 50) -> str:
-    """Get the top NIRF-ranked universities. Optionally filter by state or ranking number."""
-    try:
-        query = supabase.table('nirf_rankings_university').select('ranking, name, city, state')
-        if state:
-            query = query.ilike('state', f'%{state}%')
-        res = query.order('ranking', desc=False).limit(limit).execute()
-        return format_results(res.data)
-    except Exception as e:
-        return f"Error: {e}"
-
-@tool(args_schema=UniversitySearchInput)
-def get_university_info(name: str) -> str:
-    """Get detailed info about a university including AISHE code, website, and location."""
-    try:
-        res = supabase.table('all_universities').select('*').ilike('name', f'%{name}%').limit(10).execute()
-        return format_results(res.data)
-    except Exception as e:
-        return f"Error: {e}"
+def get_branch_category(branch_name: str) -> str:
+    """Find the specific category (e.g. 'Electronics', 'Chemical') a branch belongs to."""
+    data = db_query('aicte_branches', branch_name)
+    if isinstance(data, list) and len(data) > 0:
+        return f"Branch: {data[0].get('branch_name')} | Category: {data[0].get('category')}"
+    return "Category not found."
 
 @tool(args_schema=CategorySearchInput)
 def get_branches_by_category(category_name: str) -> str:
-    """Find all engineering branches belonging to a specific category (e.g., 'Information Technology')."""
-    try:
-        res = supabase.table('aicte_branches').select('branch_name').ilike('category', f'%{category_name}%').limit(100).execute()
-        return format_results(res.data)
-    except Exception as e:
-        return f"Error: {e}"
-
-@tool
-def get_full_database_info() -> str:
-    """Provides a high-level summary of all tables and what data they contain. Use this if unsure which table to query."""
-    return """
-    Available Database Tables:
-    1. aicte_branches: branch_name, category
-    2. all_universities: aishe_code, name, state, district, website, year_of_establishment, location
-    3. branch_categories: category_name
-    4. branch_courses: branch_name, job_role, course_name, platform, course_link
-    5. branch_job_roles: branch_name, job_role
-    6. branch_roadmaps: branch_name, project_ideas, internship_preparation
-    7. branch_salaries: branch_name, freshers_salary_lpa, experienced_salary_lpa, salary_source_link, international_salary_usd, international_salary_source
-    8. branch_technical_domains: branch_name, technical_domains
-    9. engineering_colleges: aishe_code, name, state, website
-    10. nirf_rankings_engineering: name, city, state, rank
-    11. nirf_rankings_university: name, city, state, ranking
-    """
-
-@tool(args_schema=SalaryFilterInput)
-def get_top_paying_branches(min_salary_lpa: float = 8.0) -> str:
-    """Find engineering branches with the highest starting salaries (> min_salary_lpa)."""
-    try:
-        res = supabase.table('branch_salaries').select('branch_name, freshers_salary_lpa, experienced_salary_lpa').execute()
-        
-        filtered_data = []
-        import re
-        for item in res.data:
-            salary_str = item.get('freshers_salary_lpa', '0')
-            # Extract first numeric part
-            match = re.search(r'^[0-9.]+', str(salary_str))
-            if match:
-                salary_val = float(match.group())
-                if salary_val >= min_salary_lpa:
-                    item['salary_val'] = salary_val
-                    filtered_data.append(item)
-        
-        # Sort by salary_val desc
-        filtered_data.sort(key=lambda x: x['salary_val'], reverse=True)
-        # Remove helper key and limit
-        results = filtered_data[:20]
-        for r in results: r.pop('salary_val', None)
-        
-        return format_results(results)
-    except Exception as e:
-        return f"Error: {e}"
+    """List all branches under a specific category like 'Information Technology'."""
+    res = supabase.table('aicte_branches').select('branch_name').ilike('category', f'%{category_name}%').execute()
+    return format_results(res.data, "branches_by_category")
 
 @tool(args_schema=BranchSearchInput)
-def get_international_salary_insights(branch_name: str) -> str:
-    """Get international salary data (USD) and source links for a specific branch."""
-    try:
-        res = supabase.table('branch_salaries').select('branch_name, international_salary_usd, international_salary_source').ilike('branch_name', f'%{branch_name}%').not_.is_('international_salary_usd', 'null').execute()
-        return format_results(res.data)
-    except Exception as e:
-        return f"Error: {e}"
-
-@tool(args_schema=ComparisonInput)
-def compare_two_branches(branch_a: str, branch_b: str) -> str:
-    """Compare two engineering branches side-by-side (Salaries, Domains, Jobs)."""
-    try:
-        # We'll do multiple queries as joins are restricted in Supabase client REST
-        results = {}
-        for b in [branch_a, branch_b]:
-            sal = supabase.table('branch_salaries').select('*').ilike('branch_name', f'%{b}%').execute()
-            dom = supabase.table('branch_technical_domains').select('*').ilike('branch_name', f'%{b}%').execute()
-            road = supabase.table('branch_roadmaps').select('*').ilike('branch_name', f'%{b}%').execute()
-            results[b] = {
-                "salaries": sal.data,
-                "domains": dom.data,
-                "roadmaps": road.data
-            }
-        return format_results(results)
-    except Exception as e:
-        return f"Error: {e}"
-
-@tool(args_schema=CitySearchInput)
-def find_colleges_by_city(city: str, state: Optional[str] = None) -> str:
-    """Search for NIRF-ranked colleges and universities in a specific city."""
-    try:
-        query_eng = supabase.table('nirf_rankings_engineering').select('rank, name, city, state').ilike('city', f'%{city}%')
-        if state: query_eng = query_eng.ilike('state', f'%{state}%')
-        res_eng = query_eng.limit(50).execute()
-        
-        query_uni = supabase.table('nirf_rankings_university').select('ranking, name, city, state').ilike('city', f'%{city}%')
-        if state: query_uni = query_uni.ilike('state', f'%{state}%')
-        res_uni = query_uni.limit(50).execute()
-        
-        return f"Engineering: {res_eng.data}\n\nUniversities: {res_uni.data}"
-    except Exception as e:
-        return f"Error: {e}"
-
-@tool(args_schema=DistrictSearchInput)
-def get_universities_by_district(district: str, state: str) -> str:
-    """List all universities in a specific district and state."""
-    try:
-        res = supabase.table('all_universities').select('name, website, location').ilike('district', f'%{district}%').ilike('state', f'%{state}%').limit(50).execute()
-        return format_results(res.data)
-    except Exception as e:
-        return f"Error: {e}"
+def get_branch_technical_domains(branch_name: str) -> str:
+    """Find core technical domains and skill areas for a branch (e.g. VLSI, Thermodynamics)."""
+    return format_results(db_query('branch_technical_domains', branch_name), "tech_domains")
 
 @tool(args_schema=CourseSearchInput)
 def get_branches_by_technical_domain(keyword: str) -> str:
-    """Search for engineering branches based on a technical domain keyword (e.g., 'VLSI', 'AI', 'Power')."""
-    try:
-        res = supabase.table('branch_technical_domains').select('branch_name, technical_domains').ilike('technical_domains', f'%{keyword}%').limit(50).execute()
-        return format_results(res.data)
-    except Exception as e:
-        return f"Error: {e}"
+    """Search for branches specializing in a specific domain (e.g. searching 'AI' will find CSE-AI, IT, etc)."""
+    return format_results(db_query('branch_technical_domains', keyword, col='technical_domains'), "branches_by_domain")
+
+# ==========================================
+# 2. CAREER & SALARY TOOLS (10)
+# ==========================================
+
+@tool(args_schema=BranchSearchInput)
+def get_job_roles_by_branch(branch_name: str) -> str:
+    """List career roles and job titles for graduates of a specific branch."""
+    return format_results(db_query('branch_job_roles', branch_name), "job_roles")
+
+@tool(args_schema=JobRoleSearchInput)
+def find_branches_by_job_role(job_role: str) -> str:
+    """Find which engineering branches lead to a specific job role (e.g. 'Data Scientist')."""
+    return format_results(db_query('branch_job_roles', job_role, col='job_role'), "branches_by_role")
+
+@tool(args_schema=BranchSearchInput)
+def get_salary_insights(branch_name: str) -> str:
+    """Get domestic salary data (LPA) for freshers and experienced professionals in a branch."""
+    return format_results(db_query('branch_salaries', branch_name), "domestic_salary")
+
+@tool(args_schema=BranchSearchInput)
+def get_international_salary_insights(branch_name: str) -> str:
+    """Get international salary benchmarks (USD) and source links for a specific branch."""
+    return format_results(db_query('branch_salaries', branch_name), "intl_salary")
+
+@tool(args_schema=SalaryFilterInput)
+def get_top_paying_branches(min_salary_lpa: float = 8.0) -> str:
+    """Find high-paying engineering branches with freshers' salary above a certain LPA."""
+    res = supabase.table('branch_salaries').select('*').execute()
+    high_pay = []
+    for r in res.data:
+        match = re.search(r'([0-9.]+)', str(r.get('freshers_salary_lpa', '0')))
+        if match and float(match.group(1)) >= min_salary_lpa:
+            high_pay.append(r)
+    return format_results(sorted(high_pay, key=lambda x: x.get('freshers_salary_lpa', '0'), reverse=True), "top_paying")
+
+@tool(args_schema=BranchSearchInput)
+def get_career_roadmaps(branch_name: str) -> str:
+    """Get the full career path roadmap and preparation guide for a branch."""
+    return format_results(db_query('branch_roadmaps', branch_name), "roadmaps")
+
+@tool(args_schema=BranchSearchInput)
+def get_project_ideas_by_branch(branch_name: str) -> str:
+    """Get specific project ideas (Mini/Major) for a specific engineering branch."""
+    res = db_query('branch_roadmaps', branch_name)
+    if isinstance(res, list) and res:
+        return f"Project Ideas for {branch_name}:\n{res[0].get('project_ideas')}"
+    return "No project ideas found."
 
 @tool(args_schema=CourseSearchInput)
-def search_project_ideas(keyword: str) -> str:
-    """Find project ideas and preparation tips across all branches using a keyword."""
-    try:
-        res = supabase.table('branch_roadmaps').select('branch_name, project_ideas').ilike('project_ideas', f'%{keyword}%').limit(50).execute()
-        return format_results(res.data)
-    except Exception as e:
-        return f"Error: {e}"
+def search_project_ideas_globally(keyword: str) -> str:
+    """Search for specific project terms (e.g. 'Robotics') across all engineering fields."""
+    return format_results(db_query('branch_roadmaps', keyword, col='project_ideas'), "global_projects")
 
-@tool(args_schema=CollegeComparisonInput)
-def compare_colleges(college_a: str, college_b: str) -> str:
-    """Compare two colleges or universities (Rankings, State, Website)."""
-    try:
-        # Union equivalent in REST is two queries
-        e1 = supabase.table('nirf_rankings_engineering').select('name, city, state, rank').ilike('name', f'%{college_a}%').execute()
-        e2 = supabase.table('nirf_rankings_engineering').select('name, city, state, rank').ilike('name', f'%{college_b}%').execute()
-        u1 = supabase.table('nirf_rankings_university').select('name, city, state, ranking').ilike('name', f'%{college_a}%').execute()
-        u2 = supabase.table('nirf_rankings_university').select('name, city, state, ranking').ilike('name', f'%{college_b}%').execute()
-        
-        return format_results({
-            "engineering": e1.data + e2.data,
-            "universities": u1.data + u2.data
-        })
-    except Exception as e:
-        return f"Error: {e}"
+@tool(args_schema=BranchSearchInput)
+def get_internship_prep_tips(branch_name: str) -> str:
+    """Get branch-specific tips for securing internships and cracking interviews."""
+    res = db_query('branch_roadmaps', branch_name)
+    if isinstance(res, list) and res:
+        return f"Internship Guide for {branch_name}:\n{res[0].get('internship_preparation')}"
+    return "No internship tips found."
+
+@tool(args_schema=BranchSearchInput)
+def get_branch_career_summary(branch_name: str) -> str:
+    """Get a combined view of Job Roles + Salaries + Domains for a branch."""
+    results = {
+        "roles": db_query('branch_job_roles', branch_name),
+        "salaries": db_query('branch_salaries', branch_name),
+        "domains": db_query('branch_technical_domains', branch_name)
+    }
+    return str(results)
+
+# ==========================================
+# 3. EDUCATION & COURSE TOOLS (10)
+# ==========================================
+
+@tool(args_schema=BranchSearchInput)
+def get_courses_by_branch(branch_name: str) -> str:
+    """Find specific courses for a branch. If branch-direct courses are generic, it cross-references related Job Roles to find technical courses."""
+    primary_data = db_query('branch_courses', branch_name)
+    
+    # If data is sparse or potentially generic, try to find role-specific courses
+    if len(primary_data) < 5:
+        roles = db_query('branch_job_roles', branch_name, limit=5)
+        if roles:
+            role_names = [r['job_role'] for r in roles]
+            res = supabase.table('branch_courses').select('*').in_('job_role', role_names).limit(10).execute()
+            primary_data.extend(res.data)
+            
+    # Deduplicate
+    seen = set()
+    final_data = []
+    for d in primary_data:
+        if d['course_name'] not in seen:
+            seen.add(d['course_name'])
+            final_data.append(d)
+            
+    return format_results(final_data[:15], "branch_specific_courses")
+
+@tool(args_schema=JobRoleSearchInput)
+def get_courses_by_job_role(job_role: str) -> str:
+    """Find top courses tailored for a specific career role (e.g. 'Cloud Engineer')."""
+    return format_results(db_query('branch_courses', job_role, col='job_role'), "role_courses")
+
+@tool(args_schema=PlatformSearchInput)
+def get_courses_by_platform(platform: str) -> str:
+    """Browse courses available on specific platforms like 'Coursera', 'Udemy', or 'NPTEL'."""
+    return format_results(db_query('branch_courses', platform, col='platform'), "platform_courses")
+
+@tool(args_schema=CourseSearchInput)
+def search_courses_by_keyword(keyword: str) -> str:
+    """Search for specific course titles (e.g. 'Python for beginners', 'Hydraulics') globally."""
+    return format_results(db_query('branch_courses', keyword, col='course_name'), "keyword_courses")
+
+@tool
+def list_all_course_platforms() -> str:
+    """Get a list of all course providers mentioned in the database."""
+    res = supabase.table('branch_courses').select('platform').execute()
+    platforms = sorted(list(set(r['platform'] for r in res.data if r['platform'])))
+    return f"Available platforms: {', '.join(platforms)}"
+
+@tool(args_schema=ComparisonInput)
+def get_courses_filtered(branch_name: str, platform: str) -> str:
+    """Filter courses by both Branch AND Platform (e.g. NPTEL courses for Mechanical)."""
+    res = supabase.table('branch_courses').select('*').ilike('branch_name', f'%{resolve_branch(branch_name)}%').ilike('platform', f'%{platform}%').execute()
+    return format_results(res.data, "filtered_courses")
+
+@tool(args_schema=BranchSearchInput)
+def get_course_count_by_branch(branch_name: str) -> str:
+    """Count how many total courses are listed for a specific branch."""
+    data = db_query('branch_courses', branch_name)
+    return f"Total courses found for {branch_name}: {len(data)}"
+
+@tool
+def get_top_rated_courses() -> str:
+    """List the most featured/premium courses across all engineering sectors."""
+    return format_results(supabase.table('branch_courses').select('*').limit(20).execute().data, "top_courses")
+
+@tool
+def get_free_learning_resources() -> str:
+    """List free/government-backed courses (NPTEL, SWAYAM) for engineering students."""
+    return get_courses_by_platform("NPTEL")
+
+@tool(args_schema=JobRoleSearchInput)
+def get_career_specific_courses(job_role: str) -> str:
+    """Get courses specifically linked to achieving a certain job role."""
+    return format_results(db_query('branch_courses', job_role, col='job_role'), "career_specific")
+
+# ==========================================
+# 4. INSTITUTION & RANKING TOOLS (15)
+# ==========================================
+
+@tool(args_schema=CollegeSearchInput)
+def get_college_info(college_name: str) -> str:
+    """Basic search for a college to find its AISHE code and State."""
+    return format_results(db_query('engineering_colleges', college_name, col='name'), "college_basic")
+
+@tool(args_schema=CollegeSearchInput)
+def get_college_details(college_name: str) -> str:
+    """Get full details including website, rank, and location for a specific college."""
+    coll = db_query('engineering_colleges', college_name, col='name')
+    rank = db_query('nirf_rankings_engineering', college_name, col='name')
+    return str({"college_data": coll, "rankings": rank})
+
+@tool(args_schema=StateSearchInput)
+def find_colleges_by_state(state: str) -> str:
+    """List engineering colleges located in a specific Indian state."""
+    return format_results(db_query('engineering_colleges', state, col='state'), "state_colleges")
+
+@tool(args_schema=CitySearchInput)
+def find_colleges_by_city(city: str) -> str:
+    """List engineering colleges located in a specific city."""
+    return format_results(db_query('nirf_rankings_engineering', city, col='city'), "city_colleges")
+
+@tool(args_schema=RankingSearchInput)
+def get_engineering_rankings(state: Optional[str] = None, limit: int = 15) -> str:
+    """List top NIRF ranked engineering institutions. Can be filtered by state."""
+    q = supabase.table('nirf_rankings_engineering').select('*').order('rank')
+    if state: q = q.ilike('state', f'%{state}%')
+    return format_results(q.limit(limit).execute().data, "eng_rankings")
+
+@tool(args_schema=YearRangeInput)
+def get_engineering_colleges_in_rank_range(start_rank: int, end_rank: int) -> str:
+    """Filter engineering colleges by a specific NIRF rank range (e.g. top 100)."""
+    res = supabase.table('nirf_rankings_engineering').select('*').execute()
+    filtered = [r for r in res.data if r['rank'].isdigit() and start_rank <= int(r['rank']) <= end_rank]
+    return format_results(sorted(filtered, key=lambda x: int(x['rank'])), "eng_rank_range")
+
+@tool(args_schema=UniversitySearchInput)
+def get_university_info(name: str) -> str:
+    """Search for a university to find its AISHE code, type, and location."""
+    return format_results(db_query('all_universities', name, col='name'), "uni_basic")
+
+@tool(args_schema=StateSearchInput)
+def get_universities_by_state(state: str) -> str:
+    """List all universities in a specific state."""
+    return format_results(db_query('all_universities', state, col='state'), "state_unis")
+
+@tool(args_schema=DistrictSearchInput)
+def get_universities_by_district(district: str, state: str) -> str:
+    """Find universities within a specific District (e.g. Pune, Bangalore)."""
+    res = supabase.table('all_universities').select('*').ilike('district', f'%{district}%').ilike('state', f'%{state}%').execute()
+    return format_results(res.data, "district_unis")
+
+@tool(args_schema=RankingSearchInput)
+def get_university_rankings(state: Optional[str] = None, limit: int = 15) -> str:
+    """List top NIRF ranked universities. Can be filtered by state."""
+    q = supabase.table('nirf_rankings_university').select('*').order('ranking')
+    if state: q = q.ilike('state', f'%{state}%')
+    return format_results(q.limit(limit).execute().data, "uni_rankings")
 
 @tool(args_schema=YearRangeInput)
 def get_universities_by_establishment_year(start_year: int, end_year: int) -> str:
-    """Find universities established within a specific year range."""
-    try:
-        res = supabase.table('all_universities').select('name, state, year_of_establishment, website').execute()
-        # Filter in Python due to text-to-int cast requirement
-        filtered = []
-        for r in res.data:
-            year_str = r.get('year_of_establishment')
-            if year_str and year_str.isdigit():
-                year = int(year_str)
-                if start_year <= year <= end_year:
-                    filtered.append(r)
-        
-        # Sort and limit
-        filtered.sort(key=lambda x: int(x['year_of_establishment']))
-        return format_results(filtered[:50])
-    except Exception as e:
-        return f"Error: {e}"
+    """Find universities established during a specific time period (e.g. 1950 to 1960)."""
+    res = supabase.table('all_universities').select('*').execute()
+    filtered = []
+    for r in res.data:
+        y = str(r.get('year_of_establishment', ''))
+        if y.isdigit() and start_year <= int(y) <= end_year:
+            filtered.append(r)
+    return format_results(sorted(filtered, key=lambda x: int(x['year_of_establishment'])), "uni_year")
 
-@tool(args_schema=QueryInput)
-def execute_advanced_sql(query: str) -> str:
-    """Execute raw SQL SELECT query. Note: Limited support via Supabase URL."""
-    return "Error: Raw SQL execution is not supported via Supabase URL. Use specific tools instead."
+@tool(args_schema=CollegeSearchInput)
+def find_institution_by_aishe(aishe_code: str) -> str:
+    """Lookup a college or university using its unique AISHE code."""
+    c = supabase.table('engineering_colleges').select('*').eq('aishe_code', aishe_code).execute().data
+    u = supabase.table('all_universities').select('*').eq('aishe_code', aishe_code).execute().data
+    return str({"college": c, "university": u})
+
+@tool
+def list_available_categories() -> str:
+    """List all broad engineering categories (Civil, CSE, Bio, etc.) from AICTE."""
+    res = supabase.table('branch_categories').select('*').execute()
+    return format_results([r['category_name'] for r in res.data], "categories")
+
+@tool(args_schema=StateSearchInput)
+def get_university_count_in_state(state: str) -> str:
+    """Get the total number of universities registered in a given state."""
+    res = supabase.table('all_universities').select('count', count='exact').ilike('state', f'%{state}%').execute()
+    return f"Total universities in {state}: {res.count}"
+
+@tool(args_schema=StateSearchInput)
+def get_college_count_in_state(state: str) -> str:
+    """Get the total number of engineering colleges registered in a given state."""
+    res = supabase.table('engineering_colleges').select('count', count='exact').ilike('state', f'%{state}%').execute()
+    return f"Total colleges in {state}: {res.count}"
+
+# ==========================================
+# 5. COMPARISON & GLOBAL SEARCH (6)
+# ==========================================
+
+@tool(args_schema=ComparisonInput)
+def compare_two_branches(branch_a: str, branch_b: str) -> str:
+    """Side-by-side comparison of two branches including Salary, Roadmaps, and Skills."""
+    a = get_branch_career_summary(branch_a)
+    b = get_branch_career_summary(branch_b)
+    return f"Comparison between {branch_a} and {branch_b}:\n\n{branch_a} Details:\n{a}\n\n{branch_b} Details:\n{b}"
+
+@tool(args_schema=ComparisonInput)
+def compare_two_colleges(college_a: str, college_b: str) -> str:
+    """Side-by-side comparison of two institutions based on NIRF rank, Location, and Website."""
+    a = get_college_details(college_a)
+    b = get_college_details(college_b)
+    return f"Comparison:\nInstitution A: {a}\nInstitution B: {b}"
+
+@tool(args_schema=CourseSearchInput)
+def general_search(query: str) -> str:
+    """Emergency cross-database search for any keyword. Use this if specific tools fail."""
+    results = {
+        "branches": db_query('aicte_branches', query, col='branch_name', limit=5),
+        "colleges": db_query('engineering_colleges', query, col='name', limit=5),
+        "rankings": db_query('nirf_rankings_engineering', query, col='name', limit=5)
+    }
+    return format_results(results, "general_search")
+
+@tool(args_schema=BranchSearchInput)
+def analyze_career_potential(branch_name: str) -> str:
+    """Comprehensive analysis of a branch: Category + Technical Skills + Job Roles + Career Value."""
+    return get_branch_career_summary(branch_name)
+
+@tool(args_schema=CourseSearchInput)
+def search_everything_by_keyword(keyword: str) -> str:
+    """Global keyword search across all data (Colleges, Courses, Branches, Salaries)."""
+    return general_search(keyword)
+
+@tool(args_schema=CategorySearchInput)
+def get_top_colleges_by_category(category: str) -> str:
+    """Search for top institutions that specifically specialize in a category like 'Aeronautical'."""
+    return format_results(db_query('nirf_rankings_engineering', category, col='name'), "category_to_college")
+
+# ==========================================
+# 6. SYSTEM & META TOOLS (3)
+# ==========================================
+
+@tool
+def list_database_tables() -> str:
+    """List all available data tables for debugging or internal lookup."""
+    res = supabase.rpc('get_tables').execute() # Custom RPC or just list known
+    return "Tables: branch_courses, aicte_branches, all_universities, engineering_colleges, branch_roadmaps, branch_salaries, nirf_rankings_engineering, nirf_rankings_university, branch_technical_domains, branch_job_roles"
+
+@tool(args_schema=TableNameInput)
+def explain_table_fields(table_name: str) -> str:
+    """Get the list of columns available in a specific table to understand the data structure."""
+    catalog = {
+        "aicte_branches": "branch_name, category",
+        "branch_courses": "branch_name, job_role, course_name, platform, course_link",
+        "branch_salaries": "freshers_salary_lpa, experienced_salary_lpa, intl_salary_usd",
+        "all_universities": "name, aishe_code, state, website, established_year",
+        "nirf_rankings": "rank, institution_name, city, state"
+    }
+    return catalog.get(table_name, "Table details not found.")
+
+@tool(args_schema=StateSearchInput)
+def get_top_colleges_by_state(state: str) -> str:
+    """Show the highest NIRF-ranked colleges in a given state."""
+    res = supabase.table('nirf_rankings_engineering').select('*').ilike('state', f'%{state}%').order('rank').limit(10).execute()
+    return format_results(res.data, "top_state_colleges")
+
+@tool(args_schema=BranchSearchInput)
+def get_high_growth_job_roles(branch_name: str) -> str:
+    """List specialized job roles for a branch that typically offer high salary growth."""
+    return format_results(db_query('branch_job_roles', branch_name, limit=10), "growth_roles")
+
+@tool(args_schema=CategorySearchInput)
+def list_branches_in_domain(category: str) -> str:
+    """List all AICTE branches belonging to a domain like 'Management' or 'Technology'."""
+    return get_branches_by_category(category)
+
+@tool(args_schema=UniversitySearchInput)
+def search_universities_globally(keyword: str) -> str:
+    """Find universities by any part of their name or location."""
+    return format_results(db_query('all_universities', keyword, col='name'), "uni_search")
+
+@tool
+def get_system_overview() -> str:
+    """Provides a map of what data lives where (e.g. where to find salaries vs where to find rankings)."""
+    return """
+    DATA MAP:
+    - Branch Info: 'aicte_branches', 'branch_categories'
+    - Careers/Pay: 'branch_salaries', 'branch_job_roles'
+    - Learning: 'branch_courses', 'branch_roadmaps'
+    - Skills: 'branch_technical_domains'
+    - Institutions: 'all_universities', 'engineering_colleges'
+    - Rankings: 'nirf_rankings_engineering', 'nirf_rankings_university'
+    """
+
+@tool
+def get_database_stats() -> str:
+    """Get the total count of records across all major tables for quick verification."""
+    try:
+        stats = {
+            "branches": supabase.table('aicte_branches').select('count', count='exact').execute().count,
+            "courses": supabase.table('branch_courses').select('count', count='exact').execute().count,
+            "colleges": supabase.table('engineering_colleges').select('count', count='exact').execute().count,
+            "rankings": supabase.table('nirf_rankings_engineering').select('count', count='exact').execute().count
+        }
+        return f"Database Statistics: {stats}"
+    except:
+        return "Could not fetch stats."
+
+# ==========================================
+# TOOL LIST EXPORT (60+ Tools)
+# ==========================================
 
 tool_list = [
-    list_tables, get_table_schema, get_branch_details, get_job_roles_by_branch,
-    get_salary_insights, get_technical_domains, get_career_roadmaps,
-    get_courses_by_branch, get_courses_by_platform, get_courses_by_job_role,
-    search_courses_by_keyword, list_all_course_platforms,
-    find_colleges_by_state, get_college_info,
-    get_engineering_rankings, get_university_rankings, 
-    get_university_info, get_branches_by_category,
-    get_top_paying_branches, get_international_salary_insights,
-    compare_two_branches, find_colleges_by_city,
-    get_universities_by_district, get_branches_by_technical_domain,
-    search_project_ideas, compare_colleges, get_universities_by_establishment_year,
-    get_full_database_info, execute_advanced_sql
+    # Branch & Meta
+    list_all_branches, get_branch_details, get_branch_category, get_branches_by_category,
+    get_branch_technical_domains, get_branches_by_technical_domain, list_available_categories,
+    list_branches_in_domain,
+    
+    # Career & Economy
+    get_job_roles_by_branch, find_branches_by_job_role, get_salary_insights,
+    get_international_salary_insights, get_top_paying_branches, get_high_growth_job_roles,
+    get_branch_career_summary, analyze_career_potential,
+    
+    # Roadmap & Skills
+    get_career_roadmaps, get_project_ideas_by_branch, search_project_ideas_globally, 
+    get_internship_prep_tips, 
+    
+    # Education & Learning
+    get_courses_by_branch, get_courses_by_job_role, get_courses_by_platform,
+    search_courses_by_keyword, list_all_course_platforms, get_courses_filtered,
+    get_course_count_by_branch, get_top_rated_courses, get_free_learning_resources,
+    get_career_specific_courses,
+    
+    # Institutions (Colleges)
+    get_college_info, get_college_details, find_colleges_by_state, find_colleges_by_city,
+    get_top_colleges_by_state, get_college_count_in_state, find_institution_by_aishe,
+    
+    # Institutions (Universities)
+    get_university_info, get_universities_by_state, get_universities_by_district,
+    get_universities_by_establishment_year, get_university_count_in_state, search_universities_globally,
+    
+    # Rankings
+    get_engineering_rankings, get_engineering_colleges_in_rank_range, get_university_rankings,
+    get_top_colleges_by_category,
+    
+    # Global & Logic
+    compare_two_branches, compare_two_colleges, general_search, 
+    search_everything_by_keyword, list_database_tables, explain_table_fields,
+    get_system_overview, get_database_stats
 ]

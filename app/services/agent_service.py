@@ -7,26 +7,28 @@ from langgraph.prebuilt import ToolNode
 from langgraph.graph.message import add_messages
 from app.tools.extensive_tools import tool_list
 
-# Load environment
+# Load environment safely
 GROQ_KEYS = [k.strip() for k in os.getenv("GROQ_API_KEYS", os.getenv("GROQ_API_KEY", "")).split(",") if k.strip()]
 
 class MultiKeyLLM:
     def __init__(self, keys: list[str]):
-        # Set max_retries=0 to prevent internal waiting and trigger our failover immediately
-        self.llms = [
-            ChatGroq(
-                model="llama-3.3-70b-versatile", 
-                groq_api_key=k, 
-                temperature=0,
-                max_retries=0
-            ) for k in keys
-        ]
+        if not keys:
+            print("WARNING: No GROQ API keys provided!")
+            self.llms = []
+        else:
+            self.llms = [
+                ChatGroq(
+                    model="llama-3.3-70b-versatile", 
+                    groq_api_key=k, 
+                    temperature=0,
+                    max_retries=0
+                ) for k in keys
+            ]
         self.current_index = 0
 
     def get_llm(self):
         if not self.llms:
-            raise ValueError("No GROQ API keys found in environment.")
-        # Simple cycle - each call moves to next key to distribute load
+            raise ValueError("No GROQ API keys found in environment. Please add GROQ_API_KEY to Render.")
         llm = self.llms[self.current_index]
         self.current_index = (self.current_index + 1) % len(self.llms)
         return llm
@@ -36,32 +38,31 @@ multi_llm = MultiKeyLLM(GROQ_KEYS)
 class AgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
 
-SYSTEM_MESSAGE = SystemMessage(content="""You are an elite Engineering Career & Education Consultant.
-You MUST follow these strict operational rules:
+# FINAL SYSTEM PROMPT: Enforcing strict result limits and mandatory explanations
+SYSTEM_MESSAGE = SystemMessage(content="""You are the 'Supabase Engineering Intelligence' agent.
+You have access to 60+ specialized tools for engineering branches, careers, education, and rankings.
 
-1. **TOOL USAGE IS MANDATORY**: If you need to search for courses, branches, colleges, or rankings, you MUST use the provided tools. 
-2. **NO INTERNAL CODE**: Never output tags like '<|python_tag|>' or try to write your own database queries. Use the specialized tool for the specific task.
-3. **ONLY USE PROVIDED TOOLS**: Your only way to get data is through the tools in your 'tool_list'. 
-4. **DATA SCHEMA**:
-   - Courses -> use `get_courses_by_branch`
-   - Branches -> use `get_branch_details`
-   - Jobs -> use `get_job_roles_by_branch`
-   - Salaries -> use `get_salary_insights`
-5. **SEARCH VARIATIONS**: If 'ECE' fails, automatically retry with 'Electronics' using the appropriate tool.
+### OUTPUT RULES (STRICT):
+1. **TOP 5 ONLY**: When listing courses, colleges, or any data, you MUST only show the top 5 most relevant results. Do NOT show 10, 15, or more.
+2. **SUMMARY & JUSTIFICATION**: After every list of results, you MUST provide a separate section titled "### Why this data?". 
+   - Explain how these specific 5 items are relevant to the user's branch (e.g., 'VLSI is the core of Integrated Circuit design in ECE').
+   - Provide a 1-2 sentence summary of the career value of these results.
+3. **TOOL USAGE**: Always use tools. Never imagine data.
+4. **NO HALLUCINATIONS**: If the database data is generic, report it honestly but explain the context.
 
-RESPONSE FORMAT:
-- If you call a tool, your output should be the tool call.
-- Once you have the data, provide a premium, human-friendly summary with clickable links.
-- DO NOT invent your own query language or tags.
+### RESPONSE STYLE:
+- Professional, structured, and extremely helpful.
+- For comparison requests, always use tables.
 """)
 
 def call_model(state: AgentState):
     messages = state["messages"]
+    
+    # Safely insert system message if not present
     if not any(isinstance(m, SystemMessage) for m in messages):
         messages = [SYSTEM_MESSAGE] + messages
     
-    # Try calling Groq with fallback logic
-    max_retries = len(multi_llm.llms)
+    max_retries = max(1, len(multi_llm.llms))
     last_error = None
     
     for _ in range(max_retries):
@@ -71,13 +72,13 @@ def call_model(state: AgentState):
             response = model_with_tools.invoke(messages)
             return {"messages": [response]}
         except Exception as e:
-            # Check for Rate Limit (429) specifically
             if "rate_limit_exceeded" in str(e).lower() or "429" in str(e):
                 print(f"⚠️ Rate limit hit on key {multi_llm.current_index}. Switching to next key...")
                 last_error = e
-                continue # Try next key
+                continue
             else:
-                raise e # Re-raise if it's a different kind of error
+                print(f"CRITICAL LLM ERROR: {str(e)}")
+                raise e 
                 
     raise last_error or Exception("All Groq API keys failed.")
 

@@ -49,7 +49,7 @@ class UniversitySearchInput(BaseModel):
 
 class CollegeComparisonInput(BaseModel):
     college_a: str = Field(description="First college/university name")
-    branch_b: str = Field(description="Second college/university name")
+    college_b: str = Field(description="Second college/university name")
 
 class YearRangeInput(BaseModel):
     start_year: int = Field(description="Starting year of establishment")

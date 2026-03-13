@@ -19,12 +19,20 @@ async def chat_with_agent(request: ChatRequest):
         messages.append(HumanMessage(content=request.message))
         
         inputs = {"messages": messages}
-        config = {"recursion_limit": 10}
+        config = {"recursion_limit": 15} # Increased for complex queries
         
-        final_state = agent_engine.invoke(inputs, config=config)
-        final_response = final_state["messages"][-1].content
-        
-        return {"response": final_response}
+        try:
+            final_state = agent_engine.invoke(inputs, config=config)
+            final_response = final_state["messages"][-1].content
+            return {"response": final_response}
+        except Exception as engine_err:
+            logging.error(f"Engine execution error: {engine_err}")
+            # If the engine itself fails, return a friendly message rather than crashing
+            return {
+                "response": "I'm sorry, I encountered an internal error while processing your request. This might be due to complexity or a temporary service issue. Could you please try rephrasing your question?",
+                "error": str(engine_err)
+            }
+
     except Exception as e:
-        logging.error(f"Error in chat endpoint: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logging.error(f"General error in chat endpoint: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error. Please try again later.")
