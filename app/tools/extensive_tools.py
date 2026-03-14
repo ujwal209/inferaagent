@@ -21,12 +21,52 @@ if not url or not key:
 supabase: Client = create_client(url, key)
 
 # ==========================================
+# TAVILY WEB SEARCH ENGINE (Load Balanced)
+# ==========================================
+import random
+TAVILY_KEYS = [k.strip() for k in os.getenv("TAVILY_API_KEYS", os.getenv("TAVILY_API_KEY", "")).split(",") if k.strip()]
+random.shuffle(TAVILY_KEYS) # Distribute initial load across restarts
+
+class TavilySearcher:
+    def __init__(self, keys: list[str]):
+        self.keys = keys
+        self.current_index = 0
+    
+    def search(self, query: str, search_depth: str = "advanced") -> list:
+        if not self.keys:
+            return []
+        
+        import requests
+        max_retries = len(self.keys)
+        
+        for _ in range(max_retries):
+            idx = self.current_index
+            key = self.keys[idx]
+            self.current_index = (self.current_index + 1) % len(self.keys)
+            
+            try:
+                payload = {
+                    "api_key": key,
+                    "query": query,
+                    "search_depth": search_depth,
+                    "max_results": 7 # Pulled up to 7 to give the AI more context
+                }
+                response = requests.post("https://api.tavily.com/search", json=payload, timeout=15)
+                if response.status_code == 200:
+                    return response.json().get("results", [])
+            except:
+                pass
+        return []
+
+tavily_engine = TavilySearcher(TAVILY_KEYS)
+
+# ==========================================
 # CORE ENGINE HELPERS
 # ==========================================
 
 def format_results(data: Any, tool_name: str = "unknown") -> str:
     if not data:
-        return f"No results found for '{tool_name}'. Please refine your search."
+        return f"No results found for '{tool_name}'. WARNING: YOU MUST USE THE 'web_search' TOOL NOW."
     
     if isinstance(data, list):
         count = len(data)
@@ -68,7 +108,6 @@ def db_query(table: str, branch: str = None, col: str = "branch_name", limit: in
         q = supabase.table(table).select("*")
         if branch:
             canonical = resolve_branch(branch)
-            # Use ilike for fuzzy matching on the canonical name
             q = q.ilike(col, f"%{canonical}%")
         res = q.order('id').limit(limit).execute()
         return res.data
@@ -76,7 +115,35 @@ def db_query(table: str, branch: str = None, col: str = "branch_name", limit: in
         return []
 
 # ==========================================
-# 1. BRANCH META TOOLS (6)
+# 1. PRIMARY WEB SEARCH TOOL (TOP PRIORITY)
+# ==========================================
+
+@tool(args_schema=CourseSearchInput)
+def web_search(keyword: str) -> str:
+    """
+    [PRIMARY TOOL] Use this FIRST for almost all user queries, especially for finding courses, 
+    latest industry salaries, emerging career paths, and real-time university/college news.
+    DO NOT hallucinate data; if the database tools fail, you MUST call this tool.
+    """
+    # Force Indian Context to prevent hallucinations of US/European data
+    search_query = keyword
+    if "india" not in keyword.lower() and "nptel" not in keyword.lower():
+        search_query = f"{keyword} engineering in India"
+        
+    results = tavily_engine.search(search_query)
+    
+    if not results:
+        return "Live web search returned no results. Tell the user you cannot find the information."
+        
+    formatted = f"LIVE WEB SEARCH RESULTS FOR '{search_query}':\n\n"
+    for r in results:
+        formatted += f"- Title: {r.get('title')}\n  URL: {r.get('url')}\n  Content Snippet: {r.get('content')}\n\n"
+    
+    formatted += "\nINSTRUCTION: Extract the exact URLs and Titles from above and present them to the user in a Markdown Table."
+    return formatted
+
+# ==========================================
+# 2. BRANCH META TOOLS 
 # ==========================================
 
 @tool
@@ -86,7 +153,7 @@ def list_all_branches() -> str:
     return format_results([r['branch_name'] for r in res.data if r.get('branch_name')], "all_branches")
 
 @tool(args_schema=BranchSearchInput)
-def get_branch_details(branch_name: str) -> str:
+def search_branch_details(branch_name: str) -> str:
     """Get the AICTE category and full name of a branch."""
     return format_results(db_query('aicte_branches', branch_name), "branch_details")
 
@@ -96,7 +163,7 @@ def get_branch_category(branch_name: str) -> str:
     data = db_query('aicte_branches', branch_name)
     if isinstance(data, list) and len(data) > 0:
         return f"Branch: {data[0].get('branch_name')} | Category: {data[0].get('category')}"
-    return "Category not found."
+    return "Category not found. USE web_search tool."
 
 @tool(args_schema=CategorySearchInput)
 def get_branches_by_category(category_name: str) -> str:
@@ -115,11 +182,11 @@ def get_branches_by_technical_domain(keyword: str) -> str:
     return format_results(db_query('branch_technical_domains', keyword, col='technical_domains'), "branches_by_domain")
 
 # ==========================================
-# 2. CAREER & SALARY TOOLS (10)
+# 3. CAREER & SALARY TOOLS
 # ==========================================
 
 @tool(args_schema=BranchSearchInput)
-def get_job_roles_by_branch(branch_name: str) -> str:
+def search_job_roles_by_branch(branch_name: str) -> str:
     """List career roles and job titles for graduates of a specific branch."""
     return format_results(db_query('branch_job_roles', branch_name), "job_roles")
 
@@ -129,7 +196,7 @@ def find_branches_by_job_role(job_role: str) -> str:
     return format_results(db_query('branch_job_roles', job_role, col='job_role'), "branches_by_role")
 
 @tool(args_schema=BranchSearchInput)
-def get_salary_insights(branch_name: str) -> str:
+def search_salary_insights(branch_name: str) -> str:
     """Get domestic salary data (LPA) for freshers and experienced professionals in a branch."""
     return format_results(db_query('branch_salaries', branch_name), "domestic_salary")
 
@@ -150,7 +217,7 @@ def get_top_paying_branches(min_salary_lpa: float = 8.0) -> str:
     return format_results(sorted(high_pay, key=lambda x: x.get('freshers_salary_lpa', '0'), reverse=True), "top_paying")
 
 @tool(args_schema=BranchSearchInput)
-def get_career_roadmaps(branch_name: str) -> str:
+def search_career_roadmaps(branch_name: str) -> str:
     """Get the full career path roadmap and preparation guide for a branch."""
     return format_results(db_query('branch_roadmaps', branch_name), "roadmaps")
 
@@ -160,7 +227,7 @@ def get_project_ideas_by_branch(branch_name: str) -> str:
     res = db_query('branch_roadmaps', branch_name)
     if isinstance(res, list) and res:
         return f"Project Ideas for {branch_name}:\n{res[0].get('project_ideas')}"
-    return "No project ideas found."
+    return "No project ideas found. USE web_search tool."
 
 @tool(args_schema=CourseSearchInput)
 def search_project_ideas_globally(keyword: str) -> str:
@@ -173,7 +240,7 @@ def get_internship_prep_tips(branch_name: str) -> str:
     res = db_query('branch_roadmaps', branch_name)
     if isinstance(res, list) and res:
         return f"Internship Guide for {branch_name}:\n{res[0].get('internship_preparation')}"
-    return "No internship tips found."
+    return "No internship tips found. USE web_search tool."
 
 @tool(args_schema=BranchSearchInput)
 def get_branch_career_summary(branch_name: str) -> str:
@@ -186,31 +253,16 @@ def get_branch_career_summary(branch_name: str) -> str:
     return str(results)
 
 # ==========================================
-# 3. EDUCATION & COURSE TOOLS (10)
+# 4. EDUCATION & COURSE TOOLS
 # ==========================================
 
 @tool(args_schema=BranchSearchInput)
-def get_courses_by_branch(branch_name: str) -> str:
-    """Find specific courses for a branch. If branch-direct courses are generic, it cross-references related Job Roles to find technical courses."""
-    primary_data = db_query('branch_courses', branch_name)
-    
-    # If data is sparse or potentially generic, try to find role-specific courses
-    if len(primary_data) < 5:
-        roles = db_query('branch_job_roles', branch_name, limit=5)
-        if roles:
-            role_names = [r['job_role'] for r in roles]
-            res = supabase.table('branch_courses').select('*').in_('job_role', role_names).limit(10).execute()
-            primary_data.extend(res.data)
-            
-    # Deduplicate
-    seen = set()
-    final_data = []
-    for d in primary_data:
-        if d['course_name'] not in seen:
-            seen.add(d['course_name'])
-            final_data.append(d)
-            
-    return format_results(final_data[:15], "branch_specific_courses")
+def get_courses(branch_name: str) -> str:
+    """If a user asks for courses, ALWAYS prioritize web_search directly. This acts as a fallback."""
+    db_results = db_query('branch_courses', branch_name, limit=10)
+    if db_results:
+        return format_results(db_results, "get_courses")
+    return "Database has no courses for this branch. YOU MUST EXECUTE `web_search` NOW."
 
 @tool(args_schema=JobRoleSearchInput)
 def get_courses_by_job_role(job_role: str) -> str:
@@ -262,7 +314,7 @@ def get_career_specific_courses(job_role: str) -> str:
     return format_results(db_query('branch_courses', job_role, col='job_role'), "career_specific")
 
 # ==========================================
-# 4. INSTITUTION & RANKING TOOLS (15)
+# 5. INSTITUTION & RANKING TOOLS
 # ==========================================
 
 @tool(args_schema=CollegeSearchInput)
@@ -361,7 +413,7 @@ def get_college_count_in_state(state: str) -> str:
     return f"Total colleges in {state}: {res.count}"
 
 # ==========================================
-# 5. COMPARISON & GLOBAL SEARCH (6)
+# 6. COMPARISON & GLOBAL SEARCH 
 # ==========================================
 
 @tool(args_schema=ComparisonInput)
@@ -404,13 +456,12 @@ def get_top_colleges_by_category(category: str) -> str:
     return format_results(db_query('nirf_rankings_engineering', category, col='name'), "category_to_college")
 
 # ==========================================
-# 6. SYSTEM & META TOOLS (3)
+# 7. SYSTEM & META TOOLS
 # ==========================================
 
 @tool
 def list_database_tables() -> str:
     """List all available data tables for debugging or internal lookup."""
-    res = supabase.rpc('get_tables').execute() # Custom RPC or just list known
     return "Tables: branch_courses, aicte_branches, all_universities, engineering_colleges, branch_roadmaps, branch_salaries, nirf_rankings_engineering, nirf_rankings_university, branch_technical_domains, branch_job_roles"
 
 @tool(args_schema=TableNameInput)
@@ -478,22 +529,25 @@ def get_database_stats() -> str:
 # ==========================================
 
 tool_list = [
+    # Top Priority
+    web_search,
+    
     # Branch & Meta
-    list_all_branches, get_branch_details, get_branch_category, get_branches_by_category,
+    list_all_branches, search_branch_details, get_branch_category, get_branches_by_category,
     get_branch_technical_domains, get_branches_by_technical_domain, list_available_categories,
     list_branches_in_domain,
     
     # Career & Economy
-    get_job_roles_by_branch, find_branches_by_job_role, get_salary_insights,
+    search_job_roles_by_branch, find_branches_by_job_role, search_salary_insights,
     get_international_salary_insights, get_top_paying_branches, get_high_growth_job_roles,
     get_branch_career_summary, analyze_career_potential,
     
     # Roadmap & Skills
-    get_career_roadmaps, get_project_ideas_by_branch, search_project_ideas_globally, 
+    search_career_roadmaps, get_project_ideas_by_branch, search_project_ideas_globally, 
     get_internship_prep_tips, 
     
     # Education & Learning
-    get_courses_by_branch, get_courses_by_job_role, get_courses_by_platform,
+    get_courses, get_courses_by_job_role, get_courses_by_platform,
     search_courses_by_keyword, list_all_course_platforms, get_courses_filtered,
     get_course_count_by_branch, get_top_rated_courses, get_free_learning_resources,
     get_career_specific_courses,
