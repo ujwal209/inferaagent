@@ -50,7 +50,7 @@ tavily_engine = TavilySearcher(TAVILY_KEYS)
 # SCHEMAS
 # ==========================================
 class GeneralSearchInput(BaseModel):
-    keyword: str = Field(description="The exact search query to find the requested information.")
+    keyword: str = Field(description="A highly specific search query to find courses, salaries, or engineering info. Example: 'Top Machine Learning courses NPTEL Coursera India'")
 
 # ==========================================
 # 1. ONLY TOOL: PRIMARY WEB SEARCH
@@ -59,28 +59,23 @@ class GeneralSearchInput(BaseModel):
 @tool(args_schema=GeneralSearchInput)
 def web_search(keyword: str) -> str:
     """
-    Use this tool to find ANY information the user requests (courses, comparisons, college rankings, salary trends).
+    Use this tool to search the live internet for courses, career paths, salaries, colleges, or news.
+    Formulate a highly specific search query based on what the user needs.
     """
-    # Force Indian Context to prevent hallucinations of US/European data
-    search_query = keyword
-    if "india" not in keyword.lower():
-        search_query = f"{keyword} engineering India 2024 2025"
-        
-    # max_results is set slightly higher to ensure enough data for a good comparison table
-    results = tavily_engine.search(search_query, max_results=8)
+    results = tavily_engine.search(keyword, max_results=8)
     
     if not results:
-        return "Live web search returned no results. Tell the user you cannot find the information."
+        return f"No live results found for '{keyword}'. Inform the user and suggest a broader search."
         
-    formatted = f"LIVE WEB SEARCH RESULTS FOR '{search_query}':\n\n"
-    for r in results:
-        formatted += f"- Title: {r.get('title')}\n  URL: {r.get('url')}\n  Content: {r.get('content')}\n\n"
+    formatted = f"RAW SEARCH RESULTS FOR '{keyword}':\n\n"
+    for i, r in enumerate(results, 1):
+        # Explicitly passing URL so the LLM doesn't lose it
+        formatted += f"[{i}] TITLE: {r.get('title')}\nURL: {r.get('url')}\nCONTENT: {r.get('content')}\n\n"
     
-    formatted += "\nINSTRUCTION: Synthesize this data into a SINGLE comprehensive Markdown table, followed immediately by the Summary section."
     return formatted
 
 # ==========================================
-# TOOL LIST EXPORT (Just the one tool)
+# TOOL LIST EXPORT
 # ==========================================
 
 tool_list = [
