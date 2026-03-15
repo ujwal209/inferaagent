@@ -4,80 +4,183 @@ import os
 import requests
 from dotenv import load_dotenv
 import random
+import concurrent.futures
 
 # Load environment
 load_dotenv()
 
 # ==========================================
-# TAVILY WEB SEARCH ENGINE (Load Balanced)
+# DEEP TAVILY WEB SEARCH ENGINE (Round-Robin)
 # ==========================================
 TAVILY_KEYS = [k.strip() for k in os.getenv("TAVILY_API_KEYS", os.getenv("TAVILY_API_KEY", "")).split(",") if k.strip()]
 random.shuffle(TAVILY_KEYS)
 
 class TavilySearcher:
+    """Round-robin load-balanced Tavily client — Deep & Advanced."""
+
     def __init__(self, keys: list[str]):
         self.keys = keys
         self.current_index = 0
-    
-    def search(self, query: str, search_depth: str = "advanced", max_results: int = 8) -> list:
+
+    def search(self, query: str, max_results: int = 10):
         if not self.keys:
-            return []
-        
-        max_retries = len(self.keys)
-        
-        for _ in range(max_retries):
+            return [], ""
+
+        for _ in range(len(self.keys)):
             idx = self.current_index
             key = self.keys[idx]
             self.current_index = (self.current_index + 1) % len(self.keys)
-            
+
             try:
                 payload = {
                     "api_key": key,
                     "query": query,
-                    "search_depth": search_depth,
-                    "max_results": max_results
+                    "search_depth": "advanced", # DEEP SEARCH
+                    "include_answer": True,     # LATEST AI-COMPILED ANSWER
+                    "max_results": max_results,
                 }
-                response = requests.post("https://api.tavily.com/search", json=payload, timeout=15)
-                if response.status_code == 200:
-                    return response.json().get("results", [])
-            except:
-                pass
-        return []
+                resp = requests.post(
+                    "https://api.tavily.com/search", json=payload, timeout=20
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    return data.get("results", []), data.get("answer", "")
+            except Exception as e:
+                print(f"⚠️  Tavily key index {idx} failed: {str(e)[:80]}")
+                continue
+
+        return [], ""
 
 tavily_engine = TavilySearcher(TAVILY_KEYS)
+
+# ==========================================
+# UNIFIED SEARCH
+# ==========================================
+
+def _run_search(query: str, max_results: int = 10) -> tuple[list, str]:
+    """
+    1. Try Tavily Advanced with round-robin key rotation.
+    """
+    print(f"\n🌐 [SEARCH INITIATED] Deep Tavily Search for: '{query}'")
+    results, answer = tavily_engine.search(query, max_results=max_results)
+    
+    if results:
+        print(f"✅ [TAVILY HIT] Retrieved {len(results)} raw results.")
+        return results, answer
+        
+    return [], ""
 
 # ==========================================
 # SCHEMAS
 # ==========================================
 class GeneralSearchInput(BaseModel):
-    keyword: str = Field(description="A highly specific search query to find courses, salaries, or engineering info. Example: 'Top Machine Learning courses NPTEL Coursera India'")
+    keyword: str = Field(
+        description=(
+            "A highly specific search query to find courses, salaries, or engineering info. "
+            "Example: 'Top Machine Learning courses NPTEL Coursera India'"
+        )
+    )
 
 # ==========================================
-# 1. ONLY TOOL: PRIMARY WEB SEARCH
+# 1. PRIMARY WEB SEARCH TOOL
 # ==========================================
 
 @tool(args_schema=GeneralSearchInput)
 def web_search(keyword: str) -> str:
     """
-    Use this tool to search the live internet for courses, career paths, salaries, colleges, or news.
-    Formulate a highly specific search query based on what the user needs.
+    Search the live internet for courses, career paths, salaries, colleges, or news using Deep Advanced Search.
+    Formulate a highly specific query based on what the user needs to get accurate and latest data.
     """
-    results = tavily_engine.search(keyword, max_results=8)
-    
-    if not results:
-        return f"No live results found for '{keyword}'. Inform the user and suggest a broader search."
+    results, answer = _run_search(keyword, max_results=10)
+
+    if not results and not answer:
+        return (
+            f"No live results found for '{keyword}'. "
+            "Inform the user and suggest a broader or differently worded search."
+        )
+
+    formatted = f"DEEP SEARCH REPORT FOR '{keyword}':\n\n"
+    if answer:
+        formatted += f"### EXTRACTED ANSWER / LATEST DATA\n{answer}\n\n### RAW SOURCES:\n"
         
-    formatted = f"RAW SEARCH RESULTS FOR '{keyword}':\n\n"
     for i, r in enumerate(results, 1):
-        # Explicitly passing URL so the LLM doesn't lose it
-        formatted += f"[{i}] TITLE: {r.get('title')}\nURL: {r.get('url')}\nCONTENT: {r.get('content')}\n\n"
-    
+        formatted += (
+            f"[{i}] TITLE: {r.get('title')}\n"
+            f"URL: {r.get('url')}\n"
+            f"CONTENT: {r.get('content')}\n\n"
+        )
     return formatted
+
+# ==========================================
+# 2. FOUNDER & TEAM INFO TOOL
+# ==========================================
+
+# Authoritative, hardcoded team data — never hallucinate this
+_INFERA_CORE_INFO = """
+INFERA CORE — Official Team & Founding Information
+====================================================
+
+Platform Overview:
+INFERA CORE is an advanced artificial intelligence platform designed to transform
+how users interact with knowledge, data, and intelligent decision-making technologies.
+It is built on the principle of converting complex data into meaningful intelligence,
+making advanced AI accessible, reliable, and practical for real-world applications.
+
+Founder & CEO:
+- Name: K. V. Maheedhara Kashyap
+- Role: Founder and CEO
+- Institution: Nitte Meenakshi Institute of Technology, Bangalore, Karnataka
+- Contribution: Envisioned and architected INFERA CORE as a next-generation AI
+  intelligence system; the primary driving force behind the platform.
+
+Co-Founder:
+- Name: Rahul C A
+- Role: Co-Founder
+- Institution: Nitte Meenakshi Institute of Technology, Bangalore, Karnataka
+
+Managing Director:
+- Name: Ujwal
+- Role: Managing Director
+- Institution: BMS College of Engineering, Bangalore, Karnataka
+- Contribution: Leads a major part of the platform's development and operational
+  advancement; significant technical contributions and leadership in shaping the
+  architecture, development, and execution of INFERA CORE.
+
+Data Science & Analytics Team (all from Nitte Meenakshi Institute of Technology,
+Bangalore, Karnataka):
+- Pratham S — Data Scientist
+- Karan S — Data Analyst
+- Harsha P M — Data Architect; worked efficiently in the collection of approved
+  data which helps in building the accurate AI agent.
+
+Sales & Marketing:
+- Rishi — Sales and Marketing Executive
+  Institution: Nitte Meenakshi Institute of Technology, Bangalore, Karnataka
+
+Guiding Principle:
+To engineer an AI-driven ecosystem that converts complex data and information into
+meaningful intelligence — empowering users with accurate insights, intelligent
+guidance, and data-driven decision support.
+"""
+
+class FounderInfoInput(BaseModel):
+    query: str = Field(description="A short string describing your query. Just say 'founders' or 'team'.")
+
+@tool(args_schema=FounderInfoInput)
+def get_founder_info(query: str) -> str:
+    """
+    Use this tool whenever the user asks anything about INFERA CORE's founders,
+    co-founders, CEO, managing director, team members, who built the platform,
+    or any information about the people behind INFERA CORE.
+    Returns authoritative, factual information about the INFERA CORE team.
+    """
+    return _INFERA_CORE_INFO
 
 # ==========================================
 # TOOL LIST EXPORT
 # ==========================================
 
 tool_list = [
-    web_search
+    web_search,
+    get_founder_info
 ]

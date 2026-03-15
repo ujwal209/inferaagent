@@ -58,6 +58,8 @@ SYSTEM_MESSAGE = SystemMessage(content="""You are INFERA CORE, an elite Engineer
    > What is the expected salary progression for this role?
    
 5. **ZERO HALLUCINATIONS**: Do not invent URLs, salaries, or course names.
+6. **FOUNDER & TEAM QUESTIONS (CRITICAL)**: Whenever the user asks ANYTHING about who built INFERA CORE, the founder, CEO, co-founder, managing director, team members, or the people behind this platform, you MUST call the `get_founder_info` tool FIRST and base your answer entirely on what it returns. Never guess or invent team details.
+7. **NO XML TOOL CALLS**: You must use the native JSON tool-calling capabilities of the API. NEVER write <function> or XML tags in your text to call a tool.
 """)
 
 def call_model(state: AgentState):
@@ -74,6 +76,37 @@ def call_model(state: AgentState):
         try:
             model_with_tools = llm.bind_tools(tool_list)
             response = model_with_tools.invoke(messages)
+            
+            # --- LLAMA 3 RAW <function> CATCHER ---
+            # If the model hallucinates the tool call as raw text, we intercept and convert it 
+            # into a proper LangChain ToolCall object so execution doesn't fail.
+            if isinstance(response.content, str) and "<function>" in response.content:
+                import re
+                import json
+                import uuid
+                from langchain_core.messages import AIMessage
+                
+                # Match <function>tool_name{"arg": "val"}</function>
+                match = re.search(r"<function>\s*([a-zA-Z0-9_]+)\s*(\{.*?\})\s*</function>", response.content, re.DOTALL)
+                if match:
+                    tool_name = match.group(1).strip()
+                    args_str = match.group(2).strip()
+                    try:
+                        args_dict = json.loads(args_str)
+                        
+                        # Create a new AIMessage replacing the text with native tool_calls
+                        response = AIMessage(
+                            content=response.content.replace(match.group(0), "").strip(),
+                            tool_calls=[{
+                                "name": tool_name,
+                                "args": args_dict,
+                                "id": f"call_{uuid.uuid4().hex[:8]}"
+                            }],
+                            response_metadata=getattr(response, "response_metadata", {})
+                        )
+                    except Exception as err:
+                        print(f"⚠️ Regex Tool Catch JSON Error: {err}")
+                        
             return {"messages": [response]}
         except Exception as e:
             error_str = str(e).lower()
