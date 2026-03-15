@@ -109,8 +109,43 @@ def call_model(state: AgentState):
                         
             return {"messages": [response]}
         except Exception as e:
-            error_str = str(e).lower()
-            print(f"⚠️ Groq Key Index {idx} Failed: {error_str[:100]}")
+            error_str = str(e)
+            
+            # --- LLAMA 3 GROQ 400 ERROR CATCHER ---
+            # Groq's API throws a 400 Exception when Llama 3 hallucinates a <function> tag. 
+            # We must catch the exception, extract the failed generation, and convert it to a ToolCall.
+            if "tool_use_failed" in error_str and "failed_generation" in error_str:
+                import re, json, uuid
+                from langchain_core.messages import AIMessage
+                
+                # Extract the failed_generation string from the error message
+                match_gen = re.search(r"'failed_generation':\s*'([^']+)'", error_str)
+                if match_gen:
+                    failed_gen = match_gen.group(1)
+                    
+                    # Match Groq's raw format: <function=tool_name{"arg":"val"}</function>
+                    # Also handles <function>tool_name{...}</function> just in case
+                    match_tool = re.search(r"<function=?([a-zA-Z0-9_]+)({.*?})</function>", failed_gen, re.DOTALL)
+                    if match_tool:
+                        tool_name = match_tool.group(1).strip()
+                        args_str = match_tool.group(2).strip()
+                        try:
+                            args_dict = json.loads(args_str)
+                            print(f"🛠️ [GROQ FIX] Intercepted 400 error and recovered tool call: {tool_name}")
+                            
+                            response = AIMessage(
+                                content="",
+                                tool_calls=[{
+                                    "name": tool_name,
+                                    "args": args_dict,
+                                    "id": f"call_{uuid.uuid4().hex[:8]}"
+                                }]
+                            )
+                            return {"messages": [response]}
+                        except Exception as parse_err:
+                            print(f"⚠️ Groq Fix JSON Parse Error: {parse_err}")
+
+            print(f"⚠️ Groq Key Index {idx} Failed: {error_str[:100].lower()}")
             last_error = e
             continue
                 
