@@ -14,3 +14,5 @@ watchfiles
 httpx
 pydantic
 pydantic-settings
+PyPDF2
+python-multipart
