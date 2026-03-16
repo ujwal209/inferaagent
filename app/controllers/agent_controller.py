@@ -1,38 +1,171 @@
-from fastapi import APIRouter, HTTPException
-from app.models.schemas import ChatRequest
-from app.services.agent_service import agent_engine
-from langchain_core.messages import HumanMessage, AIMessage
 import logging
+import PyPDF2
+import json
+from io import BytesIO
+from typing import Optional
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from pydantic import BaseModel
+from langchain_core.messages import HumanMessage, AIMessage
+
+# Import the pre-compiled agents from the service layer
+from app.services.agent_service import (
+    general_agent, 
+    roadmap_agent, 
+    resume_agent, 
+    study_agent  # Import the new Study Agent
+)
 
 router = APIRouter()
 
+# --- SCHEMAS ---
+class ChatRequest(BaseModel):
+    message: str
+    history: list[dict] = []
+
+class RoadmapRequest(BaseModel):
+    target_role: Optional[str] = None
+    current_skills: Optional[str] = None
+    timeframe_months: Optional[int] = None
+    message: Optional[str] = None
+    history: list[dict] = []
+
+# --- HELPER ---
+def format_history(history: list[dict]):
+    """Converts raw dictionary history into LangChain message objects."""
+    messages = []
+    for msg in history:
+        if msg["role"] == "user":
+            messages.append(HumanMessage(content=msg["content"]))
+        elif msg["role"] == "assistant":
+            messages.append(AIMessage(content=msg["content"]))
+    return messages
+
+
+# --- ENDPOINTS ---
+
 @router.post("/chat")
 async def chat_with_agent(request: ChatRequest):
+    """Original General Chat Endpoint"""
     try:
-        messages = []
-        for msg in request.history:
-            if msg["role"] == "user":
-                messages.append(HumanMessage(content=msg["content"]))
-            elif msg["role"] == "assistant":
-                messages.append(AIMessage(content=msg["content"]))
-
+        messages = format_history(request.history)
         messages.append(HumanMessage(content=request.message))
         
-        inputs = {"messages": messages}
-        config = {"recursion_limit": 15} # Increased for complex queries
+        final_state = general_agent.invoke({"messages": messages}, config={"recursion_limit": 20})
+        return {"response": final_state["messages"][-1].content}
         
-        try:
-            final_state = agent_engine.invoke(inputs, config=config)
-            final_response = final_state["messages"][-1].content
-            return {"response": final_response}
-        except Exception as engine_err:
-            logging.error(f"Engine execution error: {engine_err}")
-            # If the engine itself fails, return a friendly message rather than crashing
-            return {
-                "response": "I'm sorry, I encountered an internal error while processing your request. This might be due to complexity or a temporary service issue. Could you please try rephrasing your question?",
-                "error": str(engine_err)
-            }
-
     except Exception as e:
-        logging.error(f"General error in chat endpoint: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error. Please try again later.")
+        logging.error(f"General chat error: {e}")
+        return {
+            "response": "I'm sorry, I encountered an internal error while processing that deeply. Could you try rephrasing?", 
+            "error": str(e)
+        }
+
+
+@router.post("/roadmap")
+async def generate_roadmap(request: RoadmapRequest):
+    """Specialized Roadmap Generation Endpoint"""
+    try:
+        prompt = ""
+        # 1. Initial Generation
+        if request.target_role and request.current_skills:
+            prompt = (
+                f"I want to become a {request.target_role}. "
+                f"My current skills are: {request.current_skills}. "
+                f"I have {request.timeframe_months} months to prepare. "
+                f"Please generate a deeply detailed, milestone-based roadmap. Search the web for the latest tech stack trends."
+            )
+        # 2. Follow-up Chat
+        elif request.message:
+            prompt = request.message
+        else:
+            raise HTTPException(status_code=400, detail="Provide initial details or a follow-up message.")
+
+        # Attach history for memory
+        messages = format_history(request.history)
+        messages.append(HumanMessage(content=prompt))
+        
+        final_state = roadmap_agent.invoke({"messages": messages}, config={"recursion_limit": 20})
+        return {"response": final_state["messages"][-1].content}
+        
+    except Exception as e:
+        logging.error(f"Roadmap error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate roadmap.")
+
+
+@router.post("/study")
+async def study_with_agent(request: ChatRequest):
+    """Specialized Study Buddy Endpoint (Math, CS, Linear Algebra)"""
+    try:
+        messages = format_history(request.history)
+        messages.append(HumanMessage(content=request.message))
+        
+        final_state = study_agent.invoke({"messages": messages}, config={"recursion_limit": 20})
+        return {"response": final_state["messages"][-1].content}
+        
+    except Exception as e:
+        logging.error(f"Study agent error: {e}")
+        return {
+            "response": "I'm sorry, I encountered an error trying to solve that. Could you provide a bit more detail?",
+            "error": str(e)
+        }
+
+
+@router.post("/resume-analyze")
+async def analyze_resume(
+    target_role: Optional[str] = Form(None), 
+    message: Optional[str] = Form(None),
+    history: Optional[str] = Form(None),  # <--- NEW: Accepts stringified JSON history
+    file: Optional[UploadFile] = File(None)
+):
+    """Extracts text from PDF or handles follow-up chat messages with Memory"""
+    try:
+        prompt = ""
+
+        # SCENARIO 1: Initial Upload (Contains PDF File)
+        if file:
+            if not file.filename.lower().endswith('.pdf'):
+                raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+            
+            pdf_bytes = await file.read()
+            pdf_reader = PyPDF2.PdfReader(BytesIO(pdf_bytes))
+            extracted_text = ""
+            for page in pdf_reader.pages:
+                extracted_text += page.extract_text() + "\n"
+                
+            if not extracted_text.strip():
+                raise HTTPException(status_code=400, detail="Could not extract readable text from the PDF.")
+
+            role_text = target_role or "General Optimization"
+            prompt = (
+                f"Target Role: {role_text}\n\n"
+                f"Here is the extracted resume text:\n{extracted_text}\n\n"
+                f"Please analyze this resume deeply against the target role. Provide rewritten bullet points and thorough explanations."
+            )
+        
+        # SCENARIO 2: Follow-up Chat (No File, Contains Message)
+        elif message:
+            prompt = message
+            
+        else:
+            raise HTTPException(status_code=400, detail="Must provide either a file upload or a chat message.")
+
+        # --- MEMORY INJECTION ---
+        parsed_history = []
+        if history:
+            try:
+                parsed_history = json.loads(history)
+            except Exception as e:
+                logging.error(f"History parse error: {e}")
+
+        messages = format_history(parsed_history)
+        messages.append(HumanMessage(content=prompt))
+        
+        # Invoke agent with full conversational context
+        final_state = resume_agent.invoke({"messages": messages}) 
+        return {"response": final_state["messages"][-1].content}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Resume analysis error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to process resume.")

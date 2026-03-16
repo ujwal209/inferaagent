@@ -4,9 +4,8 @@ import os
 import requests
 from dotenv import load_dotenv
 import random
-import concurrent.futures
 
-# Load environment
+# Load environment variables
 load_dotenv()
 
 # ==========================================
@@ -35,8 +34,8 @@ class TavilySearcher:
                 payload = {
                     "api_key": key,
                     "query": query,
-                    "search_depth": "advanced", # DEEP SEARCH
-                    "include_answer": True,     # LATEST AI-COMPILED ANSWER
+                    "search_depth": "advanced", 
+                    "include_answer": True,     
                     "max_results": max_results,
                 }
                 resp = requests.post(
@@ -53,14 +52,8 @@ class TavilySearcher:
 
 tavily_engine = TavilySearcher(TAVILY_KEYS)
 
-# ==========================================
-# UNIFIED SEARCH
-# ==========================================
-
 def _run_search(query: str, max_results: int = 10) -> tuple[list, str]:
-    """
-    1. Try Tavily Advanced with round-robin key rotation.
-    """
+    """Try Tavily Advanced with round-robin key rotation."""
     print(f"\n🌐 [SEARCH INITIATED] Deep Tavily Search for: '{query}'")
     results, answer = tavily_engine.search(query, max_results=max_results)
     
@@ -69,6 +62,7 @@ def _run_search(query: str, max_results: int = 10) -> tuple[list, str]:
         return results, answer
         
     return [], ""
+
 
 # ==========================================
 # SCHEMAS
@@ -81,8 +75,12 @@ class GeneralSearchInput(BaseModel):
         )
     )
 
+class FounderInfoInput(BaseModel):
+    query: str = Field(description="A short string describing your query. Just say 'founders' or 'team'.")
+
+
 # ==========================================
-# 1. PRIMARY WEB SEARCH TOOL
+# TOOLS
 # ==========================================
 
 @tool(args_schema=GeneralSearchInput)
@@ -111,15 +109,12 @@ def web_search(keyword: str) -> str:
         )
     return formatted
 
-# ==========================================
-# 2. FOUNDER & TEAM INFO TOOL
-# ==========================================
 
 # Authoritative, hardcoded team data — never hallucinate this
 _INFERA_CORE_INFO = """
 INFERA CORE — Official Team & Founding Information
 ====================================================
-
+any question asked explain in depth about the below content
 Platform Overview:
 INFERA CORE is an advanced artificial intelligence platform designed to transform
 how users interact with knowledge, data, and intelligent decision-making technologies.
@@ -163,9 +158,6 @@ meaningful intelligence — empowering users with accurate insights, intelligent
 guidance, and data-driven decision support.
 """
 
-class FounderInfoInput(BaseModel):
-    query: str = Field(description="A short string describing your query. Just say 'founders' or 'team'.")
-
 @tool(args_schema=FounderInfoInput)
 def get_founder_info(query: str) -> str:
     """
@@ -175,6 +167,7 @@ def get_founder_info(query: str) -> str:
     Returns authoritative, factual information about the INFERA CORE team.
     """
     return _INFERA_CORE_INFO
+
 
 # ==========================================
 # TOOL LIST EXPORT

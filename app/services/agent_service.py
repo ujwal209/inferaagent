@@ -1,28 +1,35 @@
 import os
+import re
+import json
+import uuid
 import random
+import logging
 from typing import Annotated, TypedDict
+
 from langchain_groq import ChatGroq
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, AIMessage
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 from langgraph.graph.message import add_messages
-from app.tools.extensive_tools import tool_list
 
-# Load environment safely
+# Make sure this points to your actual tools file
+from app.tools.extensive_tools import tool_list 
+
+# --- 1. MULTI-KEY LLM SETUP ---
 GROQ_KEYS = [k.strip() for k in os.getenv("GROQ_API_KEYS", os.getenv("GROQ_API_KEY", "")).split(",") if k.strip()]
-random.shuffle(GROQ_KEYS) # Spread initial load
+random.shuffle(GROQ_KEYS) 
 
 class MultiKeyLLM:
     def __init__(self, keys: list[str]):
         if not keys:
-            print("WARNING: No GROQ API keys provided!")
+            logging.warning("WARNING: No GROQ API keys provided!")
             self.llms = []
         else:
             self.llms = [
                 ChatGroq(
                     model="llama-3.3-70b-versatile",
                     groq_api_key=k, 
-                    temperature=0.3, # Sweet spot for reasoning vs strict formatting
+                    temperature=0.4, # Slightly higher for richer explanations
                     max_retries=0
                 ) for k in keys
             ]
@@ -41,127 +48,128 @@ multi_llm = MultiKeyLLM(GROQ_KEYS)
 class AgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
 
-# FINAL SYSTEM PROMPT: Conversational + Mandatory Clickable Suggestions
-SYSTEM_MESSAGE = SystemMessage(content="""You are INFERA CORE, an elite Engineering Career & Education Mentor focused on the Indian ecosystem.
-
-### CORE BEHAVIORS:
-1. **CONVERSATIONAL REASONING**: Talk to the user normally. Reason with their requests, provide highly valuable insights, and structure your responses clearly.
-2. **SMART SEARCHING**: Use the `web_search` tool when you need factual data (e.g., courses, salaries, college rankings). Automatically append "India" if relevant.
-3. **MANDATORY LINKS**: When providing courses or colleges, YOU MUST INCLUDE EXACT CLICKABLE URLs using Markdown: `[Name](https://exact-url.com)`.
-4. **PROACTIVE NEXT STEPS (CRITICAL)**: At the absolute end of EVERY single response, you MUST suggest 2-3 specific follow-up prompts the user can ask you next. 
-   You MUST format these using Markdown blockquotes (`>`) so the system can render them as clickable buttons.
-   
-   Format exactly like this:
-   ###  Suggested Next Steps
-   > Compare the syllabus for these two branches.
-   > Show me the top 10 colleges for this in India.
-   > What is the expected salary progression for this role?
-   
-5. **ZERO HALLUCINATIONS**: Do not invent URLs, salaries, or course names.
-6. **FOUNDER & TEAM QUESTIONS (CRITICAL)**: Whenever the user asks ANYTHING about who built INFERA CORE, the founder, CEO, co-founder, managing director, team members, or the people behind this platform, you MUST call the `get_founder_info` tool FIRST and base your answer entirely on what it returns. Never guess or invent team details.
-7. **NO XML TOOL CALLS**: You must use the native JSON tool-calling capabilities of the API. NEVER write <function> or XML tags in your text to call a tool.
-""")
-
-def call_model(state: AgentState):
-    messages = state["messages"]
-    
-    if not any(isinstance(m, SystemMessage) for m in messages):
-        messages = [SYSTEM_MESSAGE] + messages
-    
+# --- 2. ROBUST MODEL CALLER ---
+def invoke_model_with_fallbacks(messages, tools):
+    """Handles Groq API rotations and Llama 3 tool hallucination catching."""
     max_retries = max(len(multi_llm.llms), 3) 
     last_error = None
     
     for _ in range(max_retries):
         llm, idx = multi_llm.get_llm_with_index()
         try:
-            model_with_tools = llm.bind_tools(tool_list)
-            response = model_with_tools.invoke(messages)
+            model_to_use = llm.bind_tools(tools) if tools else llm
+            response = model_to_use.invoke(messages)
             
-            # --- LLAMA 3 RAW <function> CATCHER ---
-            # If the model hallucinates the tool call as raw text, we intercept and convert it 
-            # into a proper LangChain ToolCall object so execution doesn't fail.
+            # Catch raw <function> tags in text output
             if isinstance(response.content, str) and "<function>" in response.content:
-                import re
-                import json
-                import uuid
-                from langchain_core.messages import AIMessage
-                
-                # Match <function>tool_name{"arg": "val"}</function>
                 match = re.search(r"<function>\s*([a-zA-Z0-9_]+)\s*(\{.*?\})\s*</function>", response.content, re.DOTALL)
                 if match:
-                    tool_name = match.group(1).strip()
-                    args_str = match.group(2).strip()
+                    tool_name, args_str = match.group(1).strip(), match.group(2).strip()
                     try:
                         args_dict = json.loads(args_str)
-                        
-                        # Create a new AIMessage replacing the text with native tool_calls
                         response = AIMessage(
                             content=response.content.replace(match.group(0), "").strip(),
-                            tool_calls=[{
-                                "name": tool_name,
-                                "args": args_dict,
-                                "id": f"call_{uuid.uuid4().hex[:8]}"
-                            }],
-                            response_metadata=getattr(response, "response_metadata", {})
+                            tool_calls=[{"name": tool_name, "args": args_dict, "id": f"call_{uuid.uuid4().hex[:8]}"}]
                         )
                     except Exception as err:
-                        print(f"⚠️ Regex Tool Catch JSON Error: {err}")
-                        
+                        logging.error(f"Regex Tool Catch Error: {err}")
+            
             return {"messages": [response]}
+
         except Exception as e:
             error_str = str(e)
             
-            # --- LLAMA 3 GROQ 400 ERROR CATCHER ---
-            # Groq's API throws a 400 Exception when Llama 3 hallucinates a <function> tag. 
-            # We must catch the exception, extract the failed generation, and convert it to a ToolCall.
+            # Catch Groq 400 Tool Use Failed errors
             if "tool_use_failed" in error_str and "failed_generation" in error_str:
-                import re, json, uuid
-                from langchain_core.messages import AIMessage
-                
-                # Extract the failed_generation string from the error message
                 match_gen = re.search(r"'failed_generation':\s*'([^']+)'", error_str)
                 if match_gen:
                     failed_gen = match_gen.group(1)
-                    
-                    # Match Groq's raw format: <function=tool_name{"arg":"val"}</function>
-                    # Also handles <function>tool_name{...}</function> just in case
                     match_tool = re.search(r"<function=?([a-zA-Z0-9_]+)({.*?})</function>", failed_gen, re.DOTALL)
                     if match_tool:
-                        tool_name = match_tool.group(1).strip()
-                        args_str = match_tool.group(2).strip()
+                        tool_name, args_str = match_tool.group(1).strip(), match_tool.group(2).strip()
                         try:
                             args_dict = json.loads(args_str)
-                            print(f"🛠️ [GROQ FIX] Intercepted 400 error and recovered tool call: {tool_name}")
-                            
                             response = AIMessage(
                                 content="",
-                                tool_calls=[{
-                                    "name": tool_name,
-                                    "args": args_dict,
-                                    "id": f"call_{uuid.uuid4().hex[:8]}"
-                                }]
+                                tool_calls=[{"name": tool_name, "args": args_dict, "id": f"call_{uuid.uuid4().hex[:8]}"}]
                             )
                             return {"messages": [response]}
-                        except Exception as parse_err:
-                            print(f"⚠️ Groq Fix JSON Parse Error: {parse_err}")
-
-            print(f"⚠️ Groq Key Index {idx} Failed: {error_str[:100].lower()}")
+                        except Exception:
+                            pass
+            
+            logging.warning(f"Groq Key Index {idx} Failed: {error_str[:100]}")
             last_error = e
             continue
-                
-    raise last_error or Exception("All attempts to contact the LLM failed.")
+            
+    raise last_error or Exception("All LLM attempts failed.")
 
-def should_continue(state: AgentState):
-    messages = state["messages"]
-    last_message = messages[-1]
-    return "continue" if last_message.tool_calls else "end"
+# --- 3. AGENT AVATAR FACTORY ---
+def create_agent(system_prompt: str, tools: list = []):
+    """Factory to create a specialized LangGraph agent."""
+    sys_msg = SystemMessage(content=system_prompt)
 
-# Build Graph
-workflow = StateGraph(AgentState)
-workflow.add_node("agent", call_model)
-workflow.add_node("action", ToolNode(tool_list))
-workflow.set_entry_point("agent")
-workflow.add_conditional_edges("agent", should_continue, {"continue": "action", "end": END})
-workflow.add_edge("action", "agent")
+    def call_node(state: AgentState):
+        msgs = state["messages"]
+        if not any(isinstance(m, SystemMessage) for m in msgs):
+            msgs = [sys_msg] + msgs
+        return invoke_model_with_fallbacks(msgs, tools)
 
-agent_engine = workflow.compile()
+    def should_continue(state: AgentState):
+        last_message = state["messages"][-1]
+        return "continue" if getattr(last_message, "tool_calls", None) else "end"
+
+    workflow = StateGraph(AgentState)
+    workflow.add_node("agent", call_node)
+    
+    if tools:
+        workflow.add_node("action", ToolNode(tools))
+        workflow.add_conditional_edges("agent", should_continue, {"continue": "action", "end": END})
+        workflow.add_edge("action", "agent")
+    else:
+        workflow.add_edge("agent", END)
+
+    workflow.set_entry_point("agent")
+    return workflow.compile()
+
+
+# --- 4. DETAILED SYSTEM PROMPTS ---
+
+COMMON_RULES = """
+### UNIVERSAL RULES:
+1. NORMAL CHAT: If the user says "hi", "hello", or asks a casual question, respond naturally and politely. Do not force a deep analysis for a simple greeting.
+2. EXACTLY ONE NEXT STEP: At the absolute end of your response, you must provide EXACTLY ONE suggested follow-up question the user can ask. Format it strictly as a blockquote starting with `>`. Do not provide multiple steps.
+"""
+
+GENERAL_PROMPT = f"""You are INFERA CORE, an elite Engineering Career & Education Mentor.
+CRITICAL INSTRUCTION: Provide rich, detailed, and highly educational explanations. Talk to the user like a senior engineering mentor.
+1. CONVERSATIONAL REASONING: Break down complex topics so they are easy to understand.
+2. SMART SEARCHING: Use web_search for factual data.
+3. MANDATORY LINKS: Format as [Name](https://exact-url.com).
+4. ZERO HALLUCINATIONS.
+{COMMON_RULES}"""
+
+ROADMAP_PROMPT = f"""You are the INFERA CORE Roadmap Architect.
+Your sole job is to create highly structured, week-by-week or month-by-month technical roadmaps.
+CRITICAL INSTRUCTION: Provide a deep, comprehensive explanation for EVERY phase. Don't just list a technology, explain *why* it's important, *what* concepts to focus on, and *how* it connects to the role.
+Use `web_search` to find the absolute latest courses, certifications, and trends.
+{COMMON_RULES}"""
+
+RESUME_PROMPT = f"""You are the INFERA CORE Resume & ATS Specialist.
+You will be provided with the raw extracted text of a user's resume.
+CRITICAL INSTRUCTION: Provide a deeply detailed, highly constructive critique. Explain *why* certain bullet points fail ATS systems and provide explicit, rewritten examples using the Action-Benefit-Metric framework.
+Analyze it for: ATS Optimization, Impact metrics, and missing skills for the target role.
+{COMMON_RULES}"""
+
+STUDY_PROMPT = f"""You are the INFERA CORE Study Agent.
+You are an elite academic tutor specializing in advanced mathematics (Linear Algebra, Calculus, Discrete Math), Computer Science, and core Engineering concepts.
+CRITICAL INSTRUCTIONS:
+1. Solve problems step-by-step. Do not skip steps. Explain the intuition behind the math.
+2. LATEX MATH: You MUST format all mathematical formulas, equations, and variables using LaTeX. Use `$` for inline equations (e.g., $E = mc^2$) and `$$` for block equations. Do NOT put spaces between the $ and the formula.
+3. Use `web_search` if you need to double-check formulas, academic definitions, or find study resources.
+{COMMON_RULES}"""
+
+# --- 5. COMPILE THE AVATARS ---
+general_agent = create_agent(GENERAL_PROMPT, tool_list)
+roadmap_agent = create_agent(ROADMAP_PROMPT, tool_list)     
+resume_agent = create_agent(RESUME_PROMPT, [])              
+study_agent = create_agent(STUDY_PROMPT, tool_list) 
