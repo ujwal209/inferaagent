@@ -119,14 +119,11 @@ def search_nptel_courses(keyword: str) -> str:
             videos = c.get("video_count", 0)
             questions = c.get("question_count", 0)
             nptel_link = f"https://nptel.ac.in/courses/{code}"
-            swayam_link = f"https://onlinecourses.nptel.ac.in/noc{code[:2]}_{code[2:]}"
 
             output += (
-                f"📘 **{name}**\n"
-                f"   Course Code : {code}\n"
+                f"📘 **[{name}]({nptel_link})** (Code: {code})\n"
                 f"   Weeks       : {len(weeks)} week(s) — {weeks if weeks else 'Self-paced'}\n"
-                f"   Videos      : {videos} | Practice Questions: {questions}\n"
-                f"   NPTEL Link  : {nptel_link}\n\n"
+                f"   Videos      : {videos} | Practice Questions: {questions}\n\n"
             )
         return output.strip()
     except Exception as e:
@@ -207,10 +204,8 @@ def search_coursera_courses(keyword: str) -> str:
                 workload = c.get("workload", "N/A")
 
                 output += (
-                    f"🎓 **{name}**\n"
-                    f"   By          : {partner_names}\n"
-                    f"   Workload    : {workload}\n"
-                    f"   Link        : {link}\n\n"
+                    f"🎓 **[{name}]({link})**\n"
+                    f"   By          : {partner_names} | Workload: {workload}\n\n"
                 )
             output += f"🔍 Browse all results: {search_url}"
             return output.strip()
@@ -288,18 +283,14 @@ def search_udemy_courses(keyword: str) -> str:
                         i.get("display_name", "") for i in instructors
                     ) if instructors else "N/A"
                     rating = c.get("rating", "N/A")
-                    reviews = c.get("num_reviews", 0)
-                    students = c.get("num_subscribers", 0)
                     price = c.get("price", "N/A")
-
+ 
                     output += (
-                        f"🛒 **{title}**\n"
-                        f"   Instructor  : {instructor_names}\n"
-                        f"   Rating      : ⭐ {rating} ({reviews:,} reviews) | {students:,} students\n"
-                        f"   Price       : {price}\n"
-                        f"   Link        : {link}\n\n"
+                        f"🛒 **[{title}]({link})**\n"
+                        f"   Instructor : {instructor_names} | Rating: ⭐ {rating}\n"
+                        f"   Price      : {price}\n\n"
                     )
-                output += f"🔍 Browse all results: {search_url}"
+                output += f"\n🔍 [Browse all Udemy results]({search_url})"
                 return output.strip()
 
         # Graceful fallback — Udemy blocks unauthenticated API access
