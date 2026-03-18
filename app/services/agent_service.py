@@ -27,9 +27,10 @@ class MultiKeyLLM:
         else:
             self.llms = [
                 ChatGroq(
+                    # We can safely use 70b now because we manage memory properly
                     model="llama-3.3-70b-versatile",
                     groq_api_key=k, 
-                    temperature=0.4, # Slightly higher for richer explanations
+                    temperature=0.4, 
                     max_retries=0
                 ) for k in keys
             ]
@@ -60,7 +61,6 @@ def invoke_model_with_fallbacks(messages, tools):
             model_to_use = llm.bind_tools(tools) if tools else llm
             response = model_to_use.invoke(messages)
             
-            # Catch raw <function> tags in text output
             if isinstance(response.content, str) and "<function>" in response.content:
                 match = re.search(r"<function>\s*([a-zA-Z0-9_]+)\s*(\{.*?\})\s*</function>", response.content, re.DOTALL)
                 if match:
@@ -79,7 +79,6 @@ def invoke_model_with_fallbacks(messages, tools):
         except Exception as e:
             error_str = str(e)
             
-            # Catch Groq 400 Tool Use Failed errors
             if "tool_use_failed" in error_str and "failed_generation" in error_str:
                 match_gen = re.search(r"'failed_generation':\s*'([^']+)'", error_str)
                 if match_gen:
@@ -110,8 +109,16 @@ def create_agent(system_prompt: str, tools: list = []):
 
     def call_node(state: AgentState):
         msgs = state["messages"]
+        
+        # 🚨 CRITICAL FIX: MEMORY TRIMMER 🚨
+        # Keeps only the last 5 messages to prevent the 24,000 Token Payload crash
+        # This allows us to use deep search without breaking the Groq limit
+        if len(msgs) > 5:
+            msgs = msgs[-5:]
+            
         if not any(isinstance(m, SystemMessage) for m in msgs):
             msgs = [sys_msg] + msgs
+            
         return invoke_model_with_fallbacks(msgs, tools)
 
     def should_continue(state: AgentState):
@@ -135,28 +142,22 @@ def create_agent(system_prompt: str, tools: list = []):
 # --- 4. DETAILED SYSTEM PROMPTS ---
 
 COMMON_RULES = """
-### UNIVERSAL FORMATTING RULES:
-1. **Rich Markdown**: Use Tables, Lists, and Bolding aggressively to make data readable.
-2. **Tables**: For course lists or comparisons, ALWAYS use Markdown tables.
-3. **Links**: Format as [Course Name](https://url.com). Your frontend will automatically add the "Source" badge.
-4. **NEVER OMIT LINKS**: Even when summarizing courses into a table, you MUST include a "Link" column with the clickable markdown link. Never say "Link in Source" or leave it out.
-5. **Suggested Follow-up**: At the VERY end of your response, you MUST provide EXACTLY ONE suggested follow-up question. 
-   - Format: `> Your follow-up question here?`
-   - Your UI renders this as a clickable high-action button. Do not include more than one.
-5. **Conversational Greeting**: For simple greetings ("hi"), respond warmly but briefly without tools.
+### UNIVERSAL FORMATTING & RESPONSE RULES (CRITICAL):
+1. **Synthesize & Expand (BE DETAILED):** NEVER copy-paste raw tool output. Read the scraped data and write a comprehensive, highly detailed, and professional response. Explain the "how" and "why" in depth. Do NOT give brief or short answers.
+2. **Rich Markdown:** Use Tables, Lists, and Bolding to structure your in-depth explanations. 
+3. **Hyperlinks:** Embed valid links directly into your text. Format as [Relevant Text](https://url.com). ONLY use URLs provided by your search tool.
+4. **Suggested Follow-up:** At the VERY end of your response, provide EXACTLY ONE suggested follow-up question. Format: `> Your follow-up question here?`
 """
 
 GENERAL_PROMPT = f"""You are INFERA CORE, an elite Engineering Career & Education Mentor.
 Talk to the user like a senior engineering mentor—encouraging, deep, and technically precise.
 
 **SMART TOOL ROUTING:**
-- For **NPTEL** courses/links → Use `search_nptel_courses`
-- For **Coursera** courses/links → Use `search_coursera_courses`
-- For **Udemy** courses/links → Use `search_udemy_courses`
-- For general engineering info, news, or team info → Use `web_search` or `get_founder_info`
+You rely entirely on the `web_search` tool for finding courses, rankings, and deep engineering data.
+- If searching for Coursera courses: `site:coursera.org/learn [TOPIC]`
+- If searching for Udemy courses: `site:udemy.com/course [TOPIC]`
+- If searching for College Rankings: `[College Name] NIRF ranking placement statistics`
 
-**OUTPUT STRUCTURE:**
-After receiving tool results, consolidate them into a beautiful report. Don't just list them; explain why these choices are good for the user's career.
 {COMMON_RULES}"""
 
 ROADMAP_PROMPT = f"""You are the INFERA CORE Roadmap Architect.
@@ -165,8 +166,9 @@ You create professional, high-impact career roadmaps.
 **INSTRUCTIONS:**
 1. Break roadmaps into Stages (e.g., Week 1-4, Phase 2).
 2. Use **Tables** to show: Stage, Concept, Resource (Link), and Duration.
-3. For every resource, use the dedicated platform tools (NPTEL/Coursera/Udemy) to find REAL links.
-4. Explain the "Why" behind every technology—don't just list skills.
+3. For EVERY resource, you MUST use `web_search` to find a REAL, live link.
+4. Explain the "Why" behind every technology in detail.
+5. Filter out all website garbage from your search results before showing them to the user.
 
 {COMMON_RULES}"""
 
@@ -174,6 +176,7 @@ RESUME_PROMPT = f"""You are the INFERA CORE Resume & ATS Specialist.
 You will be provided with the raw extracted text of a user's resume.
 CRITICAL INSTRUCTION: Provide a deeply detailed, highly constructive critique. Explain *why* certain bullet points fail ATS systems and provide explicit, rewritten examples using the Action-Benefit-Metric framework.
 Analyze it for: ATS Optimization, Impact metrics, and missing skills for the target role.
+
 {COMMON_RULES}"""
 
 STUDY_PROMPT = f"""You are the INFERA CORE Study Agent (The Academic Elite).
@@ -182,11 +185,10 @@ You specialize in STEM, Math, and CS.
 **MATH & LATEX:**
 - You MUST use LaTeX for all math. 
 - Use `$` for inline math and `$$` for block equations.
-- Your frontend uses KaTeX to render these beautifully.
 
 **PEDAGOGY:**
-1. Solve problems step-by-step. 
-3. Use code blocks for any programming examples.
+1. Solve problems step-by-step with extreme detail. 
+2. Use code blocks for any programming examples.
 
 {COMMON_RULES}"""
 
@@ -194,4 +196,4 @@ You specialize in STEM, Math, and CS.
 general_agent = create_agent(GENERAL_PROMPT, tool_list)
 roadmap_agent = create_agent(ROADMAP_PROMPT, tool_list)     
 resume_agent = create_agent(RESUME_PROMPT, [])              
-study_agent = create_agent(STUDY_PROMPT, tool_list) 
+study_agent = create_agent(STUDY_PROMPT, tool_list)
