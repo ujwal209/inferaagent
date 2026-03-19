@@ -7,12 +7,12 @@ import logging
 from typing import Annotated, TypedDict
 
 from langchain_groq import ChatGroq
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, AIMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, AIMessage, ToolMessage
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 from langgraph.graph.message import add_messages
 
-# Make sure this points to your actual tools file
+# Import the tools from our separate file
 from app.tools.extensive_tools import tool_list 
 
 # --- 1. MULTI-KEY LLM SETUP ---
@@ -27,10 +27,9 @@ class MultiKeyLLM:
         else:
             self.llms = [
                 ChatGroq(
-                    # We can safely use 70b now because we manage memory properly
                     model="llama-3.3-70b-versatile",
                     groq_api_key=k, 
-                    temperature=0.4, 
+                    temperature=0.3, # Lowered temperature for strict tool adherence
                     max_retries=0
                 ) for k in keys
             ]
@@ -49,45 +48,80 @@ multi_llm = MultiKeyLLM(GROQ_KEYS)
 class AgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
 
-# --- 2. ROBUST MODEL CALLER ---
+# --- 2. AGGRESSIVE TOOL INTERCEPTOR & CALLER ---
 def invoke_model_with_fallbacks(messages, tools):
-    """Handles Groq API rotations and Llama 3 tool hallucination catching."""
+    """
+    Handles Groq API rotations and aggressively intercepts Llama 3 tool text leaks.
+    Forces leaked text into actual background tool executions.
+    """
     max_retries = max(len(multi_llm.llms), 3) 
     last_error = None
+    valid_tool_names = [t.name for t in tools] if tools else []
     
     for _ in range(max_retries):
         llm, idx = multi_llm.get_llm_with_index()
         try:
+            # Bind the tools properly to the LLM
             model_to_use = llm.bind_tools(tools) if tools else llm
             response = model_to_use.invoke(messages)
             
-            if isinstance(response.content, str) and "<function>" in response.content:
-                match = re.search(r"<function>\s*([a-zA-Z0-9_]+)\s*(\{.*?\})\s*</function>", response.content, re.DOTALL)
-                if match:
-                    tool_name, args_str = match.group(1).strip(), match.group(2).strip()
-                    try:
-                        args_dict = json.loads(args_str)
-                        response = AIMessage(
-                            content=response.content.replace(match.group(0), "").strip(),
-                            tool_calls=[{"name": tool_name, "args": args_dict, "id": f"call_{uuid.uuid4().hex[:8]}"}]
-                        )
-                    except Exception as err:
-                        logging.error(f"Regex Tool Catch Error: {err}")
+            # 1. If native tool calling worked perfectly, return immediately
+            if hasattr(response, "tool_calls") and len(response.tool_calls) > 0:
+                return {"messages": [response]}
             
+            # 2. THE JSON/XML INTERCEPTOR (Catching the Slop)
+            content = str(response.content)
+            tool_name = None
+            args_dict = None
+            
+            # Scenario A: <web_search>{"keyword": "..."}</web_search>
+            xml_match = re.search(r"<([a-zA-Z0-9_]+)>\s*(\{.*?\})\s*</\1>", content, re.DOTALL)
+            # Scenario B: <function=web_search>{"keyword": "..."}</function>
+            func_match = re.search(r"<function[=>\s]*([a-zA-Z0-9_]+)[>\s]*(\{.*?\})\s*</function>", content, re.DOTALL)
+            # Scenario C: Just raw JSON dropped in the text like {"keyword": "..."}
+            raw_match = re.search(r"(\{\s*\"(keyword|query)\"\s*:\s*\"[^\"]+\"\s*\})", content)
+
+            if xml_match and xml_match.group(1).strip() in valid_tool_names:
+                tool_name = xml_match.group(1).strip()
+                try: args_dict = json.loads(xml_match.group(2).strip())
+                except: pass
+
+            elif func_match and func_match.group(1).strip() in valid_tool_names:
+                tool_name = func_match.group(1).strip()
+                try: args_dict = json.loads(func_match.group(2).strip())
+                except: pass
+
+            elif raw_match and tools:
+                # If it's raw JSON with a "keyword" or "query", default to the first available tool
+                tool_name = valid_tool_names[0] if valid_tool_names else None
+                try: args_dict = json.loads(raw_match.group(1).strip())
+                except: pass
+
+            # 3. IF WE CAUGHT A LEAK: Scrub the text, force the tool call
+            if tool_name and args_dict:
+                # Create a clean AI message that executes the tool instead of showing text
+                forced_response = AIMessage(
+                    content="", # Erase the ugly leaked text
+                    tool_calls=[{"name": tool_name, "args": args_dict, "id": f"call_{uuid.uuid4().hex[:8]}"}]
+                )
+                return {"messages": [forced_response]}
+            
+            # 4. If it's just normal conversation (e.g. "Hi, how are you?"), return standard text
             return {"messages": [response]}
 
         except Exception as e:
             error_str = str(e)
             
+            # Catch Groq API internal "tool_use_failed" rejections and parse them manually
             if "tool_use_failed" in error_str and "failed_generation" in error_str:
                 match_gen = re.search(r"'failed_generation':\s*'([^']+)'", error_str)
                 if match_gen:
                     failed_gen = match_gen.group(1)
-                    match_tool = re.search(r"<function=?([a-zA-Z0-9_]+)({.*?})</function>", failed_gen, re.DOTALL)
+                    match_tool = re.search(r"<function[=>\s]*([a-zA-Z0-9_]+)>?({.*?})</function>", failed_gen, re.DOTALL)
                     if match_tool:
-                        tool_name, args_str = match_tool.group(1).strip(), match_tool.group(2).strip()
+                        tool_name = match_tool.group(1).strip()
                         try:
-                            args_dict = json.loads(args_str)
+                            args_dict = json.loads(match_tool.group(2).strip())
                             response = AIMessage(
                                 content="",
                                 tool_calls=[{"name": tool_name, "args": args_dict, "id": f"call_{uuid.uuid4().hex[:8]}"}]
@@ -102,6 +136,7 @@ def invoke_model_with_fallbacks(messages, tools):
             
     raise last_error or Exception("All LLM attempts failed.")
 
+
 # --- 3. AGENT AVATAR FACTORY ---
 def create_agent(system_prompt: str, tools: list = []):
     """Factory to create a specialized LangGraph agent."""
@@ -110,9 +145,8 @@ def create_agent(system_prompt: str, tools: list = []):
     def call_node(state: AgentState):
         msgs = state["messages"]
         
-        # 🚨 CRITICAL FIX: MEMORY TRIMMER 🚨
+        # CRITICAL FIX: MEMORY TRIMMER
         # Keeps only the last 5 messages to prevent the 24,000 Token Payload crash
-        # This allows us to use deep search without breaking the Groq limit
         if len(msgs) > 5:
             msgs = msgs[-5:]
             
@@ -123,6 +157,7 @@ def create_agent(system_prompt: str, tools: list = []):
 
     def should_continue(state: AgentState):
         last_message = state["messages"][-1]
+        # Route to the action node ONLY if a tool call was successfully generated/intercepted
         return "continue" if getattr(last_message, "tool_calls", None) else "end"
 
     workflow = StateGraph(AgentState)
@@ -131,6 +166,7 @@ def create_agent(system_prompt: str, tools: list = []):
     if tools:
         workflow.add_node("action", ToolNode(tools))
         workflow.add_conditional_edges("agent", should_continue, {"continue": "action", "end": END})
+        # Loop back to agent after tool finishes to summarize results
         workflow.add_edge("action", "agent")
     else:
         workflow.add_edge("agent", END)
@@ -142,56 +178,34 @@ def create_agent(system_prompt: str, tools: list = []):
 # --- 4. DETAILED SYSTEM PROMPTS ---
 
 COMMON_RULES = """
-### UNIVERSAL FORMATTING & RESPONSE RULES (CRITICAL):
-1. **Synthesize & Expand (BE DETAILED):** NEVER copy-paste raw tool output. Read the scraped data and write a comprehensive, highly detailed, and professional response. Explain the "how" and "why" in depth. Do NOT give brief or short answers.
-2. **Rich Markdown:** Use Tables, Lists, and Bolding to structure your in-depth explanations. 
-3. **Hyperlinks:** Embed valid links directly into your text. Format as [Relevant Text](https://url.com). ONLY use URLs provided by your search tool.
-4. **Suggested Follow-up prompt:** At the VERY end of your response, provide EXACTLY ONE suggested follow-up prompt. Format: `> follow up prompt here?`
-5.If the user asks general question like hi,hello,how are you reply normally dont hallucinate
+You are a professional AI. 
+If the user asks a general greeting like "hi" or "how are you", reply warmly and conversationally. DO NOT attempt to use tools for greetings.
+For all technical questions, synthesize the data and write a comprehensive, highly detailed response using Markdown (Tables, Bold text, Lists).
+Embed source links when applicable.
 """
 
 GENERAL_PROMPT = f"""You are INFERA CORE, an elite Engineering Career & Education Mentor.
-Talk to the user like a senior engineering mentor—encouraging, deep, and technically precise.
-
-**SMART TOOL ROUTING:**
-You rely entirely on the `web_search` tool for finding courses, rankings, and deep engineering data.
-- If searching for Coursera courses: `site:coursera.org/learn [TOPIC]`
-- If searching for Udemy courses: `site:udemy.com/course [TOPIC]`
-- If searching for Youtube courses: `site:youtube.com/course [TOPIC]`
-- If searching for College Rankings: `[College Name] NIRF ranking placement statistics`
-- Make sure to give seperate sections for free and paid course so that there is a clear distinction free on yt courses should be there
+If the user asks for data, courses, salaries, or news, you MUST use the `web_search` tool to fetch live information.
+Do not make up facts. Rely on your tools.
 
 {COMMON_RULES}"""
 
 ROADMAP_PROMPT = f"""You are the INFERA CORE Roadmap Architect.
 You create professional, high-impact career roadmaps.
-
-**INSTRUCTIONS:**
-1. Break roadmaps into Stages (e.g., Week 1-4, Phase 2).
-2. Use **Tables** to show: Stage, Concept, Resource (Link), and Duration.
-3. For EVERY resource, you MUST use `web_search` to find a REAL, live link.
-4. Explain the "Why" behind every technology in detail.
-5. Filter out all website garbage from your search results before showing them to the user.
+Use the `web_search` tool to find live, real-world links for the courses and resources you recommend.
+Format your roadmap using clear Markdown tables showing: Stage, Concept, Resource Link, and Duration.
 
 {COMMON_RULES}"""
 
 RESUME_PROMPT = f"""You are the INFERA CORE Resume & ATS Specialist.
-You will be provided with the raw extracted text of a user's resume.
-CRITICAL INSTRUCTION: Provide a deeply detailed, highly constructive critique. Explain *why* certain bullet points fail ATS systems and provide explicit, rewritten examples using the Action-Benefit-Metric framework.
-Analyze it for: ATS Optimization, Impact metrics, and missing skills for the target role.
+Critique the user's resume thoroughly. Explain why certain points fail ATS parsing and rewrite them using the Action-Benefit-Metric framework.
 
 {COMMON_RULES}"""
 
-STUDY_PROMPT = f"""You are the INFERA CORE Study Agent (The Academic Elite).
-You specialize in STEM, Math, and CS. 
-
-**MATH & LATEX:**
-- You MUST use LaTeX for all math. 
-- Use `$` for inline math and `$$` for block equations.
-
-**PEDAGOGY:**
-1. Solve problems step-by-step with extreme detail. 
-2. Use code blocks for any programming examples.
+STUDY_PROMPT = f"""You are the INFERA CORE Study Agent.
+You specialize in STEM, Math, and Computer Science.
+Solve problems step-by-step. You must format all mathematical formulas and equations using LaTeX.
+Use single `$` for inline math and double `$$` for block equations.
 
 {COMMON_RULES}"""
 
