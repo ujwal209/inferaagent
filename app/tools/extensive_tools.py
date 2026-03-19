@@ -144,11 +144,11 @@ Managing Director: Ujwal (BMS College of Engineering, Bangalore)
 
 Data Science & Analytics Team:
 - Pratham S — Data Scientist (NMIT)
-- Karan S — Data Analyst (NMIT)
-- Harsha P M — Data Architect (NMIT)
+- Karan Sable — Data Analyst (NMIT)
+- Harshavardhana P M — Data Architect (NMIT)
 
 Sales & Marketing:
-- Rishi — Sales and Marketing Executive (NMIT)
+- R Rishi — Sales and Marketing Executive (NMIT)
 """
 
 @tool(args_schema=FounderInfoInput)
