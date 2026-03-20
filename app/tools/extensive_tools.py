@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import random
 import logging
@@ -19,6 +20,30 @@ TAVILY_KEYS = [k.strip() for k in os.getenv("TAVILY_API_KEYS", os.getenv("TAVILY
 
 random.shuffle(SERPER_KEYS)
 random.shuffle(TAVILY_KEYS)
+
+# ==========================================
+# DEEP URL SCRAPER (For Serper Links)
+# ==========================================
+def scrape_page(url: str) -> str:
+    """Visits a URL and extracts the raw text content for deep searching."""
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        resp = requests.get(url, headers=headers, timeout=5)
+        if resp.status_code == 200:
+            text = resp.text
+            # Strip out scripts and styles to save tokens
+            text = re.sub(r'<(script|style).*?>.*?</\1>', '', text, flags=re.DOTALL | re.IGNORECASE)
+            # Strip all remaining HTML tags
+            text = re.sub(r'<[^>]+>', ' ', text)
+            # Compress whitespace
+            text = ' '.join(text.split())
+            # Return the first 1500 characters for deep context
+            return text[:1500] 
+    except Exception:
+        return ""
+    return ""
 
 # ==========================================
 # PRIMARY ENGINE: SERPER (Google Search)
@@ -102,29 +127,40 @@ class TavilySearcher:
 serper_engine = SerperSearcher(SERPER_KEYS)
 tavily_engine = TavilySearcher(TAVILY_KEYS)
 
-def _run_robust_search(query: str, max_results: int = 5) -> str:
-    """Tries Google Serper first, falls back to Tavily if Serper fails or has no keys."""
+def _run_robust_search(query: str, max_results: int = 4) -> str:
+    """Tries Google Serper (with deep scraping) first, falls back to Tavily."""
     print(f"\n🌐 [ROBUST SEARCH INITIATED] Query: '{query}'")
     
-    # --- ATTEMPT 1: SERPER (Google Search) ---
+    # --- ATTEMPT 1: SERPER (Google Search + Deep Scrape) ---
     if SERPER_KEYS:
         serper_data = serper_engine.search(query, num_results=max_results)
         organic_results = serper_data.get("organic", [])
         
         if organic_results:
-            print(f"✅ [SERPER HIT] Retrieved {len(organic_results)} organic results.")
+            print(f"✅ [SERPER HIT] Retrieved {len(organic_results)} organic results. Scraping pages...")
             formatted = f"GOOGLE SEARCH REPORT FOR '{query}':\n\n"
             
             # Add Quick Answer if available
             if "answerBox" in serper_data and "snippet" in serper_data["answerBox"]:
                 formatted += f"### QUICK ANSWER:\n{serper_data['answerBox']['snippet']}\n\n"
                 
-            formatted += "### ORGANIC SEARCH RESULTS:\n"
-            for i, r in enumerate(organic_results, 1):
+            formatted += "### ORGANIC SEARCH RESULTS (WITH DEEP SCRAPE):\n"
+            for i, r in enumerate(organic_results[:max_results], 1):
+                title = r.get('title', 'No Title')
+                link = r.get('link', 'No URL')
+                snippet = r.get('snippet', 'No Snippet')
+                
+                # 🚀 DEEP SCRAPE INJECTION: Fetch the actual website text
+                print(f"   ↳ Scraping: {link}")
+                page_content = scrape_page(link)
+                
+                # If the scraper is blocked, fall back to the standard Google snippet
+                final_content = page_content if len(page_content) > 100 else snippet
+                
                 formatted += (
-                    f"[{i}] TITLE: {r.get('title', 'No Title')}\n"
-                    f"URL: {r.get('link', 'No URL')}\n"
-                    f"SNIPPET: {r.get('snippet', 'No Snippet')}\n"
+                    f"[{i}] TITLE: {title}\n"
+                    f"URL: {link}\n"
+                    f"EXTRACTED CONTENT: {final_content}\n"
                     f"{'-'*50}\n"
                 )
             return formatted
@@ -149,8 +185,8 @@ def _run_robust_search(query: str, max_results: int = 5) -> str:
                 content = r.get('raw_content') or r.get('content') or ''
                 content = " ".join(content.split())
                 
-                if len(content) > 800:
-                    content = content[:800] + "..."
+                if len(content) > 1500:
+                    content = content[:1500] + "..."
                     
                 formatted += (
                     f"[{i}] SOURCE TITLE: {r.get('title')}\n"
@@ -177,7 +213,7 @@ class FounderInfoInput(BaseModel):
 @tool(args_schema=GeneralSearchInput)
 def web_search(keyword: str) -> str:
     """
-    Search the live internet using Google Search. 
+    Search the live internet using Google Search with Deep Scraping. 
     Use this tool whenever the user asks for real-world data, courses, roadmaps, or recent news.
     """
     return _run_robust_search(keyword)
