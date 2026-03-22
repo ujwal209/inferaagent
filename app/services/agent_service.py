@@ -193,7 +193,6 @@ def create_agent(system_prompt: str, executable_tools: list = [], ui_tools: list
     def call_node(state: AgentState):
         msgs = state["messages"]
         
-        # FIX: Bulletproof Message Trimming
         # Separate the system message from the chat history
         system_msgs = [m for m in msgs if isinstance(m, SystemMessage)]
         if not system_msgs:
@@ -201,13 +200,23 @@ def create_agent(system_prompt: str, executable_tools: list = [], ui_tools: list
             
         chat_history = [m for m in msgs if not isinstance(m, SystemMessage)]
         
-        # Keep only the last 6 messages to prevent Token Payload crashes
-        if len(chat_history) > 6:
-            chat_history = chat_history[-6:]
-            # CRITICAL: If our slice accidentally starts with a ToolMessage, remove it!
-            # Groq API will 400 Bad Request if it sees a ToolMessage without its parent AIMessage.
+        # FIX: Restored memory capacity to 40 messages (20 full conversational turns).
+        # Ensures deep context without blowing up the token payload limit.
+        if len(chat_history) > 40:
+            chat_history = chat_history[-40:]
+            
+            # CRITICAL SAFETIES FOR GROQ STRICT API:
+            # 1. Never start the array with an orphaned ToolMessage
             while chat_history and isinstance(chat_history[0], ToolMessage):
                 chat_history.pop(0)
+                
+            # 2. Never start the array with an AIMessage that made a tool call 
+            #    if we just deleted its corresponding ToolMessage.
+            while chat_history and getattr(chat_history[0], "tool_calls", None):
+                if len(chat_history) > 1 and isinstance(chat_history[1], ToolMessage):
+                    break # It has its pair, we're safe!
+                else:
+                    chat_history.pop(0) # Orphaned, remove it to prevent 400 Bad Request
                 
         safe_msgs = system_msgs + chat_history
             
