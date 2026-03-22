@@ -7,10 +7,9 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage, AIMessage
 
-# Import the pre-compiled agents from the service layer
+# Import the pre-compiled agents from the service layer (Roadmap removed)
 from app.services.agent_service import (
     general_agent, 
-    roadmap_agent, 
     resume_agent, 
     study_agent  # Import the new Study Agent
 )
@@ -20,13 +19,6 @@ router = APIRouter()
 # --- SCHEMAS ---
 class ChatRequest(BaseModel):
     message: str
-    history: list[dict] = []
-
-class RoadmapRequest(BaseModel):
-    target_role: Optional[str] = None
-    current_skills: Optional[str] = None
-    timeframe_months: Optional[int] = None
-    message: Optional[str] = None
     history: list[dict] = []
 
 # --- HELPER ---
@@ -59,37 +51,6 @@ async def chat_with_agent(request: ChatRequest):
             "response": "I'm sorry, I encountered an internal error while processing that deeply. Could you try rephrasing?", 
             "error": str(e)
         }
-
-
-@router.post("/roadmap")
-async def generate_roadmap(request: RoadmapRequest):
-    """Specialized Roadmap Generation Endpoint"""
-    try:
-        prompt = ""
-        # 1. Initial Generation
-        if request.target_role and request.current_skills:
-            prompt = (
-                f"I want to become a {request.target_role}. "
-                f"My current skills are: {request.current_skills}. "
-                f"I have {request.timeframe_months} months to prepare. "
-                f"Please generate a deeply detailed, milestone-based roadmap. Search the web for the latest tech stack trends."
-            )
-        # 2. Follow-up Chat
-        elif request.message:
-            prompt = request.message
-        else:
-            raise HTTPException(status_code=400, detail="Provide initial details or a follow-up message.")
-
-        # Attach history for memory
-        messages = format_history(request.history)
-        messages.append(HumanMessage(content=prompt))
-        
-        final_state = roadmap_agent.invoke({"messages": messages}, config={"recursion_limit": 20})
-        return {"response": final_state["messages"][-1].content}
-        
-    except Exception as e:
-        logging.error(f"Roadmap error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to generate roadmap.")
 
 
 @router.post("/study")

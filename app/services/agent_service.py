@@ -4,15 +4,16 @@ import json
 import uuid
 import random
 import logging
-from typing import Annotated, TypedDict
+from typing import Annotated, TypedDict, List, Any
 
+from pydantic import BaseModel, Field
 from langchain_groq import ChatGroq
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, AIMessage, ToolMessage
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 from langgraph.graph.message import add_messages
 
-# Import the tools from our separate file
+# Import backend tools
 from app.tools.extensive_tools import tool_list 
 
 # --- 1. MULTI-KEY LLM SETUP ---
@@ -29,8 +30,8 @@ class MultiKeyLLM:
                 ChatGroq(
                     model="llama-3.3-70b-versatile",
                     groq_api_key=k, 
-                    temperature=0.3, # Lowered temperature for strict tool adherence
-                    max_retries=0
+                    temperature=0.1, # Extremely low temperature for strict schema adherence
+                    max_retries=3    # FIX: Increased from 0 to survive micro rate-limiting
                 ) for k in keys
             ]
         self.current_index = 0
@@ -48,87 +49,132 @@ multi_llm = MultiKeyLLM(GROQ_KEYS)
 class AgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
 
-# --- 2. AGGRESSIVE TOOL INTERCEPTOR & CALLER ---
+
+# --- 2. STRICT PYDANTIC UI WIDGET SCHEMAS ---
+
+class QuizQuestion(BaseModel):
+    """A single question inside the QuizWidget."""
+    question: str = Field(description="A specific, thought-provoking question testing the concept just taught.")
+    options: List[str] = Field(description="Exactly 4 distinct options for the user to choose from.", min_length=4, max_length=4)
+    correctIndex: int = Field(description="The integer index (0, 1, 2, or 3) of the correct option.")
+    explanation: str = Field(description="A detailed explanation of why the correct option is the right answer.")
+
+class QuizWidget(BaseModel):
+    """Generates an interactive Assessment Exam."""
+    topic: str = Field(description="The main topic being tested.")
+    questions: List[QuizQuestion] = Field(
+        description="List of questions. You MUST generate EXACTLY 5 questions. NEVER generate 1 question. Provide 3 conceptual and 2 very hard numerical questions.", 
+        min_length=5, 
+        max_length=5
+    )
+
+class ProgressWidget(BaseModel):
+    """Generates an interactive Progress Tracker."""
+    topic: str = Field(description="The main subject currently being studied")
+    masteryPercentage: int = Field(description="An integer from 0 to 100 estimating their completion of the topic")
+    completedConcepts: List[str] = Field(description="List of micro-concepts the user has successfully learned so far")
+    nextConcept: str = Field(description="The name of the very next concept to learn")
+
+
+# --- 3. AGGRESSIVE TOOL INTERCEPTOR & FORMATTER ---
+def process_intercepted_response(response: AIMessage) -> AIMessage:
+    """
+    Intercepts native tool calls meant for the UI (Quiz/Progress) 
+    and converts them into the json?chameleon markdown string.
+    Leaves backend tools (like web_search) intact for the ToolNode to execute.
+    """
+    if not hasattr(response, "tool_calls") or not response.tool_calls:
+        return response
+
+    final_content = response.content or ""
+    backend_tool_calls = []
+
+    for tc in response.tool_calls:
+        if tc["name"] in ["QuizWidget", "ProgressWidget"]:
+            args = tc.get("args", {})
+            
+            # BULLETPROOF FIX: Llama 3 often stringifies nested JSON arrays. 
+            if tc["name"] == "QuizWidget" and "questions" in args and isinstance(args["questions"], str):
+                try:
+                    args["questions"] = json.loads(args["questions"])
+                except Exception as e:
+                    logging.error(f"Auto-fixer failed to parse stringified questions: {e}")
+            
+            # Format UI tools directly into the frontend markdown schema
+            widget_json = {
+                "component": tc["name"],
+                "props": args
+            }
+            final_content += f"\n\n```json?chameleon\n{json.dumps(widget_json, indent=2)}\n```\n"
+        else:
+            # Preserve backend tools
+            backend_tool_calls.append(tc)
+
+    return AIMessage(
+        content=final_content.strip(),
+        tool_calls=backend_tool_calls,
+        id=response.id or str(uuid.uuid4())
+    )
+
 def invoke_model_with_fallbacks(messages, tools):
-    """
-    Handles Groq API rotations and aggressively intercepts Llama 3 tool text leaks.
-    Forces leaked text into actual background tool executions.
-    """
     max_retries = max(len(multi_llm.llms), 3) 
     last_error = None
-    valid_tool_names = [t.name for t in tools] if tools else []
+    
+    valid_tool_names = []
+    if tools:
+        for t in tools:
+            valid_tool_names.append(getattr(t, "name", getattr(t, "__name__", "")))
     
     for _ in range(max_retries):
         llm, idx = multi_llm.get_llm_with_index()
         try:
-            # Bind the tools properly to the LLM
             model_to_use = llm.bind_tools(tools) if tools else llm
             response = model_to_use.invoke(messages)
             
-            # 1. If native tool calling worked perfectly, return immediately
-            if hasattr(response, "tool_calls") and len(response.tool_calls) > 0:
-                return {"messages": [response]}
-            
-            # 2. THE JSON/XML INTERCEPTOR (Catching the Slop)
+            # Catch raw text leaks
             content = str(response.content)
-            tool_name = None
-            args_dict = None
+            tool_name, args_dict = None, None
             
-            # Scenario A: <web_search>{"keyword": "..."}</web_search>
             xml_match = re.search(r"<([a-zA-Z0-9_]+)>\s*(\{.*?\})\s*</\1>", content, re.DOTALL)
-            # Scenario B: <function=web_search>{"keyword": "..."}</function>
             func_match = re.search(r"<function[=>\s]*([a-zA-Z0-9_]+)[>\s]*(\{.*?\})\s*</function>", content, re.DOTALL)
-            # Scenario C: Just raw JSON dropped in the text like {"keyword": "..."}
-            raw_match = re.search(r"(\{\s*\"(keyword|query)\"\s*:\s*\"[^\"]+\"\s*\})", content)
+            raw_match = re.search(r"(\{\s*\"(topic|keyword|query)\"\s*:\s*\"[^\"]+\"\s*\})", content)
 
             if xml_match and xml_match.group(1).strip() in valid_tool_names:
-                tool_name = xml_match.group(1).strip()
-                try: args_dict = json.loads(xml_match.group(2).strip())
-                except: pass
-
+                tool_name, args_dict = xml_match.group(1).strip(), json.loads(xml_match.group(2).strip())
             elif func_match and func_match.group(1).strip() in valid_tool_names:
-                tool_name = func_match.group(1).strip()
-                try: args_dict = json.loads(func_match.group(2).strip())
-                except: pass
+                tool_name, args_dict = func_match.group(1).strip(), json.loads(func_match.group(2).strip())
+            elif raw_match and tools and "QuizWidget" in valid_tool_names:
+                tool_name, args_dict = "QuizWidget", json.loads(raw_match.group(1).strip())
 
-            elif raw_match and tools:
-                # If it's raw JSON with a "keyword" or "query", default to the first available tool
-                tool_name = valid_tool_names[0] if valid_tool_names else None
-                try: args_dict = json.loads(raw_match.group(1).strip())
-                except: pass
-
-            # 3. IF WE CAUGHT A LEAK: Scrub the text, force the tool call
+            # Reconstruct leaked text into a proper ToolCall
             if tool_name and args_dict:
-                # Create a clean AI message that executes the tool instead of showing text
-                forced_response = AIMessage(
-                    content="", # Erase the ugly leaked text
+                response = AIMessage(
+                    content="", 
                     tool_calls=[{"name": tool_name, "args": args_dict, "id": f"call_{uuid.uuid4().hex[:8]}"}]
                 )
-                return {"messages": [forced_response]}
             
-            # 4. If it's just normal conversation (e.g. "Hi, how are you?"), return standard text
-            return {"messages": [response]}
+            final_response = process_intercepted_response(response)
+            return {"messages": [final_response]}
 
         except Exception as e:
             error_str = str(e)
             
-            # Catch Groq API internal "tool_use_failed" rejections and parse them manually
+            # Catch Groq's internal API parsing failures
             if "tool_use_failed" in error_str and "failed_generation" in error_str:
                 match_gen = re.search(r"'failed_generation':\s*'([^']+)'", error_str)
                 if match_gen:
                     failed_gen = match_gen.group(1)
                     match_tool = re.search(r"<function[=>\s]*([a-zA-Z0-9_]+)>?({.*?})</function>", failed_gen, re.DOTALL)
                     if match_tool:
-                        tool_name = match_tool.group(1).strip()
                         try:
-                            args_dict = json.loads(match_tool.group(2).strip())
-                            response = AIMessage(
+                            t_name = match_tool.group(1).strip()
+                            t_args = json.loads(match_tool.group(2).strip())
+                            resp = AIMessage(
                                 content="",
-                                tool_calls=[{"name": tool_name, "args": args_dict, "id": f"call_{uuid.uuid4().hex[:8]}"}]
+                                tool_calls=[{"name": t_name, "args": t_args, "id": f"call_{uuid.uuid4().hex[:8]}"}]
                             )
-                            return {"messages": [response]}
-                        except Exception:
-                            pass
+                            return {"messages": [process_intercepted_response(resp)]}
+                        except Exception: pass
             
             logging.warning(f"Groq Key Index {idx} Failed: {error_str[:100]}")
             last_error = e
@@ -137,36 +183,46 @@ def invoke_model_with_fallbacks(messages, tools):
     raise last_error or Exception("All LLM attempts failed.")
 
 
-# --- 3. AGENT AVATAR FACTORY ---
-def create_agent(system_prompt: str, tools: list = []):
+# --- 4. AGENT AVATAR FACTORY ---
+def create_agent(system_prompt: str, executable_tools: list = [], ui_tools: list = []):
     """Factory to create a specialized LangGraph agent."""
     sys_msg = SystemMessage(content=system_prompt)
+    
+    all_model_tools = executable_tools + ui_tools
 
     def call_node(state: AgentState):
         msgs = state["messages"]
         
-        # CRITICAL FIX: MEMORY TRIMMER
-        # Keeps only the last 5 messages to prevent the 24,000 Token Payload crash
-        if len(msgs) > 5:
-            msgs = msgs[-5:]
+        # FIX: Bulletproof Message Trimming
+        # Separate the system message from the chat history
+        system_msgs = [m for m in msgs if isinstance(m, SystemMessage)]
+        if not system_msgs:
+            system_msgs = [sys_msg]
             
-        if not any(isinstance(m, SystemMessage) for m in msgs):
-            msgs = [sys_msg] + msgs
+        chat_history = [m for m in msgs if not isinstance(m, SystemMessage)]
+        
+        # Keep only the last 6 messages to prevent Token Payload crashes
+        if len(chat_history) > 6:
+            chat_history = chat_history[-6:]
+            # CRITICAL: If our slice accidentally starts with a ToolMessage, remove it!
+            # Groq API will 400 Bad Request if it sees a ToolMessage without its parent AIMessage.
+            while chat_history and isinstance(chat_history[0], ToolMessage):
+                chat_history.pop(0)
+                
+        safe_msgs = system_msgs + chat_history
             
-        return invoke_model_with_fallbacks(msgs, tools)
+        return invoke_model_with_fallbacks(safe_msgs, all_model_tools)
 
     def should_continue(state: AgentState):
         last_message = state["messages"][-1]
-        # Route to the action node ONLY if a tool call was successfully generated/intercepted
         return "continue" if getattr(last_message, "tool_calls", None) else "end"
 
     workflow = StateGraph(AgentState)
     workflow.add_node("agent", call_node)
     
-    if tools:
-        workflow.add_node("action", ToolNode(tools))
+    if executable_tools:
+        workflow.add_node("action", ToolNode(executable_tools))
         workflow.add_conditional_edges("agent", should_continue, {"continue": "action", "end": END})
-        # Loop back to agent after tool finishes to summarize results
         workflow.add_edge("action", "agent")
     else:
         workflow.add_edge("agent", END)
@@ -175,10 +231,10 @@ def create_agent(system_prompt: str, tools: list = []):
     return workflow.compile()
 
 
-# --- 4. DETAILED SYSTEM PROMPTS ---
+# --- 5. DETAILED SYSTEM PROMPTS ---
 
 COMMON_RULES = """
-You are a professional AI. 
+You are a professional AI named INFERA CORE. 
 If the user asks a general greeting like "hi" or "how are you", reply warmly and conversationally. DO NOT attempt to use tools for greetings.
 For all technical questions, synthesize the data and write a comprehensive, highly detailed response using Markdown (Tables, Bold text, Lists).
 Embed source links when applicable.
@@ -190,27 +246,44 @@ Do not make up facts. Rely on your tools.
 
 {COMMON_RULES}"""
 
-ROADMAP_PROMPT = f"""You are the INFERA CORE Roadmap Architect.
-You create professional, high-impact career roadmaps.
-Use the `web_search` tool to find live, real-world links for the courses and resources you recommend.
-Format your roadmap using clear Markdown tables showing: Stage, Concept, Resource Link, and Duration.
-
-{COMMON_RULES}"""
-
 RESUME_PROMPT = f"""You are the INFERA CORE Resume & ATS Specialist.
 Critique the user's resume thoroughly. Explain why certain points fail ATS parsing and rewrite them using the Action-Benefit-Metric framework.
 
 {COMMON_RULES}"""
 
-STUDY_PROMPT = f"""You are the INFERA CORE Study Agent.
-You specialize in STEM, Math, and Computer Science.
-Solve problems step-by-step. You must format all mathematical formulas and equations using LaTeX.
-Use single `$` for inline math and double `$$` for block equations.
+STUDY_PROMPT = f"""You are the INFERA CORE Neural Study Buddy, an elite technical tutor specializing in STEM, Math, and Computer Science.
+
+YOUR PRIME DIRECTIVE: Explain concepts deeply and thoroughly before ever testing the user. You must use the Socratic method.
+1. Break complex subjects into small, digestible micro-concepts.
+2. Explain ONE micro-concept clearly, concisely, and with deep detail. Provide examples.
+3. END EVERY EXPLANATION WITH A SUGGESTED NEXT STEP: At the very end of your text response, explicitly offer a concrete next step to guide the user. 
+   - Example 1: "Shall we move on to [Next Concept Name]?"
+   - Example 2: "Would you like me to explain [Specific part] in more detail?"
+
+STRICT FORMATTING RULES (LATEX):
+- You MUST use strict LaTeX for ALL mathematical symbols, variables, formulas, and equations in your response.
+- Use double `$$` for block equations (e.g., $$ E = mc^2 $$). 
+- Use single `$` for inline math, variables, and numbers related to equations (e.g., $x$, $v = 5 m/s$). 
+- NEVER use plain text for math.
+
+TESTING & EXAM PROTOCOL (CRITICAL - STRICT ADHERENCE REQUIRED):
+- DO NOT test the user constantly. Explain things first.
+- THE 5-QUESTION EXAM RULE: WHENEVER a quiz is triggered (either because 5 concepts have been taught, OR the user explicitly clicked 'Take Quiz'), you MUST generate an EXACTLY 5-QUESTION EXAM.
+- EXAM FORMAT: You MUST call the `QuizWidget` tool and pass an array of EXACTLY 5 questions into the `questions` parameter. 
+  - The 5 questions MUST be: 3 conceptual questions and 2 highly difficult numerical questions.
+  - NEVER generate a 1-question quiz. Every single quiz must be exactly 5 questions.
+
+TOOL BEHAVIOR & MULTITASKING (CRITICAL - DO NOT IGNORE):
+- ALWAYS INCLUDE TEXT: NEVER output just a tool call or widget. Even when calling the `ProgressWidget` or `QuizWidget`, you MUST include your conversational text, explanation, and your suggested next step in the same response.
+- When a user submits quiz answers and tells you their score:
+  1. Acknowledge and praise them based on their score in standard text.
+  2. Call the `ProgressWidget` to visually update their progress.
+  3. In the SAME text response, IMMEDIATELY begin explaining the NEXT sub-concept in detail. DO NOT wait for them to ask.
+  4. End with your Suggested Next Step.
 
 {COMMON_RULES}"""
 
-# --- 5. COMPILE THE AVATARS ---
-general_agent = create_agent(GENERAL_PROMPT, tool_list)
-roadmap_agent = create_agent(ROADMAP_PROMPT, tool_list)     
-resume_agent = create_agent(RESUME_PROMPT, [])              
-study_agent = create_agent(STUDY_PROMPT, tool_list)
+# --- 6. COMPILE THE AVATARS ---
+general_agent = create_agent(GENERAL_PROMPT, executable_tools=tool_list, ui_tools=[])
+resume_agent = create_agent(RESUME_PROMPT, executable_tools=[], ui_tools=[])              
+study_agent = create_agent(STUDY_PROMPT, executable_tools=tool_list, ui_tools=[QuizWidget, ProgressWidget])

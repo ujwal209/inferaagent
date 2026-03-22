@@ -140,7 +140,6 @@ def _run_robust_search(query: str, max_results: int = 4) -> str:
             print(f"✅ [SERPER HIT] Retrieved {len(organic_results)} organic results. Scraping pages...")
             formatted = f"GOOGLE SEARCH REPORT FOR '{query}':\n\n"
             
-            # Add Quick Answer if available
             if "answerBox" in serper_data and "snippet" in serper_data["answerBox"]:
                 formatted += f"### QUICK ANSWER:\n{serper_data['answerBox']['snippet']}\n\n"
                 
@@ -150,11 +149,9 @@ def _run_robust_search(query: str, max_results: int = 4) -> str:
                 link = r.get('link', 'No URL')
                 snippet = r.get('snippet', 'No Snippet')
                 
-                # 🚀 DEEP SCRAPE INJECTION: Fetch the actual website text
-                print(f"   ↳ Scraping: {link}")
+                print(f"    ↳ Scraping: {link}")
                 page_content = scrape_page(link)
                 
-                # If the scraper is blocked, fall back to the standard Google snippet
                 final_content = page_content if len(page_content) > 100 else snippet
                 
                 formatted += (
@@ -203,21 +200,16 @@ def _run_robust_search(query: str, max_results: int = 4) -> str:
 # ==========================================
 class GeneralSearchInput(BaseModel):
     keyword: str = Field(
-        description="A highly specific Google Search query to find courses, salaries, college stats, or engineering news. Use operators like 'site:youtube.com' if needed."
+        description="A highly specific Google Search query to find courses, salaries, college stats, or engineering news."
     )
 
 class FounderInfoInput(BaseModel):
     query: str = Field(description="A short string describing your query. Just say 'founders' or 'team'.")
 
-
 @tool(args_schema=GeneralSearchInput)
 def web_search(keyword: str) -> str:
-    """
-    Search the live internet using Google Search with Deep Scraping. 
-    Use this tool whenever the user asks for real-world data, courses, roadmaps, or recent news.
-    """
+    """Search the live internet using Google Search with Deep Scraping."""
     return _run_robust_search(keyword)
-
 
 _INFERA_CORE_INFO = """
 INFERA CORE — Official Team & Founding Information
@@ -244,5 +236,4 @@ def get_founder_info(query: str) -> str:
     """Returns authoritative information about the INFERA CORE team, founders, and developers."""
     return _INFERA_CORE_INFO
 
-# Export the tools
 tool_list = [web_search, get_founder_info]
