@@ -5,7 +5,7 @@ from io import BytesIO
 from typing import Optional
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
 # Import the pre-compiled agents from the service layer (Roadmap removed)
 from app.services.agent_service import (
@@ -20,6 +20,8 @@ router = APIRouter()
 class ChatRequest(BaseModel):
     message: str
     history: list[dict] = []
+    webSearch: Optional[bool] = False
+    deepThink: Optional[bool] = False
 
 # --- HELPER ---
 def format_history(history: list[dict]):
@@ -58,6 +60,16 @@ async def study_with_agent(request: ChatRequest):
     """Specialized Study Buddy Endpoint (Math, CS, Linear Algebra)"""
     try:
         messages = format_history(request.history)
+        
+        dynamic_prompts = []
+        if request.webSearch:
+            dynamic_prompts.append("USER ENABLED WEB SEARCH: You MUST proactively use your `web_search` tool over multiple iterations to fetch up-to-date facts if necessary.")
+        if request.deepThink:
+            dynamic_prompts.append("USER ENABLED DEEP THINK: You MUST deeply reason and 'deep think' through solutions step-by-step prior to returning your final output. Be extremely detailed and thoughtful in your reasoning.")
+            
+        if dynamic_prompts:
+            messages.append(SystemMessage(content="\n\n".join(dynamic_prompts)))
+            
         messages.append(HumanMessage(content=request.message))
         
         final_state = study_agent.invoke({"messages": messages}, config={"recursion_limit": 20})

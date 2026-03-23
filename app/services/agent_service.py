@@ -29,7 +29,7 @@ class MultiKeyLLM:
         else:
             self.llms = [
                 ChatGroq(
-                    model="llama-3.3-70b-versatile",
+                    model="llama-3.1-8b-instant",
                     groq_api_key=k, 
                     temperature=0.0, # STRICT 0.0 TO KILL HALLUCINATIONS & ENSURE PURE JSON
                     max_retries=3
@@ -66,9 +66,9 @@ class QuizWidget(BaseModel):
     topic: str = Field(description="The main topic being tested.")
     difficulty: str = Field(description="Strictly one of: 'Foundational' (0-30%), 'Intermediate' (35-70%), or 'Expert' (75-100%).")
     questions: List[QuizQuestion] = Field(
-        description="MUST generate EXACTLY 5 questions. Provide 3 conceptual and 2 analytical/coding questions.", 
-        min_length=5, 
-        max_length=5
+        description="MUST generate EXACTLY 10 questions. Provide conceptual and analytical questions.", 
+        min_length=10, 
+        max_length=10
     )
 
 class ProgressWidget(BaseModel):
@@ -257,10 +257,11 @@ console.log(name);
 DO NOT use inline backticks for multi-line code. DO NOT write plain raw text.
 
 🎓 [LEARNING EXPERIENCE PROTOCOL] 🎓
-Your explanations MUST be highly detailed, comprehensive, and deeply technical.
+Your explanations MUST be highly detailed, comprehensive, and deeply technical, naturally progressing from basic level to advanced level.
+🔥 PRIORITIZE EXPLANATION OVER CODE: You MUST prioritize explaining concepts thoroughly. ONLY provide code when the topic is strictly and directly related to coding, or when code is absolutely necessary to demonstrate the concept.
 You MUST provide multiple proper, concrete examples for EVERYTHING you teach.
 Never give short or skipped explanations. Write in-depth tutorials.
-🔥 DO NOT DEVIATE FROM THE TOPIC: You MUST stick strictly to the exact topic you are teaching. Do not randomly jump into advanced or unrelated concepts (e.g. if teaching basic ML, do NOT jump into Neural Networks). Maintain a highly logical, step-by-step learning progression.
+🔥 DO NOT DEVIATE FROM THE TOPIC: You MUST stick strictly to the exact topic you are teaching. Do not divert or randomly jump into unrelated concepts (e.g. if teaching basic ML, do NOT jump into Neural Networks). Maintain a highly logical, step-by-step learning progression.
 At the beginning, skip the progress tracker until the user starts completing concepts.
 
 📐 [STRICT LATEX FORMATTING] 📐
@@ -279,7 +280,7 @@ AFTER EVERY 5 CONCEPTS (which equals exactly 25%, 50%, 75%, 100% mastery), you M
 🔥 CRITICAL 🔥: If the masteryPercentage is 5%, 10%, 15%, 20%, 30%, 35% etc., YOU MUST NEVER OUTPUT THE QUIZ WIDGET! ONLY output the QuizWidget exactly at the 25% milestones! This rule is absolute.
 The level of the quiz MUST gradually increase as the user progresses.
 CRITICAL: When you output the QuizWidget, provide the widget and wait for the user to answer.
-The quiz MUST contain exactly 5 questions.
+The quiz MUST contain exactly 10 questions.
 {COMMON_RULES}"""
 
 # ==========================================
