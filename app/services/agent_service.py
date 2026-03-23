@@ -230,14 +230,9 @@ def create_study_agent(system_prompt: str, executable_tools: list = []):
 
         # Detect EXPLICIT progress request only
         progress_keywords = ["show my progress", "my progress", "track my progress", "progress tracker", "how far", "how much have i learned", "mastery"]
-        wants_progress = any(kw in last_lower for kw in progress_keywords)
+        wants_progress = any(kw in last_lower for kw in progress_keywords) and not is_mark_done
 
-        # Auto-quiz: trigger after 7 human messages if no quiz has been given yet this session
-        quiz_already_given = any(
-            getattr(m, "type", "") == "ai" and "```json?chameleon" in (m.content or "") and "QuizWidget" in (m.content or "")
-            for m in chat_history
-        )
-        auto_quiz = (user_msg_count >= 7) and not quiz_already_given and not is_greeting and not is_mark_done and not wants_progress
+        # Auto-quiz logic completely removed based on user feedback.
 
         # Build dynamic system injection
         base_prompt = system_msgs[0].content
@@ -245,18 +240,15 @@ def create_study_agent(system_prompt: str, executable_tools: list = []):
         injection += f"Session messages so far: {user_msg_count}\n"
 
         if is_greeting:
-            injection += "MODE: GREETING. Respond warmly and naturally. Do NOT call any tools or widgets. Just say hello and ask what topic they want to study."
-        elif wants_quiz or auto_quiz:
-            if auto_quiz and not wants_quiz:
-                injection += "MODE: AUTO-QUIZ. The student has had 7+ exchanges. It's time to assess their knowledge automatically. You MUST call the QuizWidget tool NOW. Generate EXACTLY 10 questions based on ALL topics covered so far. Questions must increase in difficulty: start Foundational, mid Intermediate, end Expert."
-            else:
-                injection += "MODE: QUIZ. You MUST call the QuizWidget tool NOW. Generate EXACTLY 10 questions based on ALL topics covered so far. Questions must increase in difficulty from Foundational to Expert."
+            injection += "MODE: GREETING. Respond warmly and naturally. Do NOT call any tools or widgets. Ask what topic they want to study and briefly outline a roadmap of concepts to cover."
+        elif wants_quiz:
+            injection += "MODE: QUIZ. You MUST call the QuizWidget tool NOW. Generate EXACTLY 10 questions based on ALL topics covered so far. Questions must increase in difficulty from Foundational to Expert."
         elif wants_progress:
-            injection += "MODE: PROGRESS. You MUST call the ProgressWidget tool NOW with accurate completedConcepts, masteryPercentage (+10% per concept, max 100), and nextConcept."
+            injection += "MODE: PROGRESS. You MUST call the ProgressWidget tool NOW with accurate completedConcepts, masteryPercentage (+10% per concept, max 100), and nextConcept. Briefly explain their progress and the roadmap ahead, but DO NOT start teaching until they tell you they are ready."
         elif is_mark_done:
-            injection += "MODE: NEXT TOPIC. The user understood the current concept. Acknowledge briefly, then IMMEDIATELY give a full, in-depth tutorial on the next logical topic. Do NOT call any widget tools."
+            injection += "MODE: NEXT TOPIC. The user understood the current concept. STRONGLY ENFORCED: DO NOT OUTPUT ANY WIDGETS. Do NOT create a JSON codeblock for ProgressWidget! Instead, briefly acknowledge their success, then IMMEDIATELY provide a deep, comprehensive, highly technical tutorial on the VERY NEXT single topic. Ensure your explanation is substantial, computationally complete, and structurally sound (Intuition -> Math/Details -> Example) but teach ONLY this one sub-topic. NO PROGRESS WIDGETS."
         else:
-            injection += "MODE: TEACHING. Follow the MANDATORY RESPONSE STRUCTURE (Intuition → Math Derivation → Numerical Example → Optional Code). Do NOT call QuizWidget or ProgressWidget."
+            injection += "MODE: TEACHING. Provide deeply informative, highly technical explanations for the current concept. Balance the depth: do not give just a short 2-sentence summary, but avoid a massive wall of text that covers unrelated topics. Check for understanding with a question at the very end. Do NOT call QuizWidget or ProgressWidget."
 
         final_system = SystemMessage(content=base_prompt + injection)
         safe_msgs = [final_system] + chat_history
@@ -350,37 +342,37 @@ Your core directive is to provide world-class, deep technical tutorials.
 Wrap ALL code in markdown code blocks with the correct language tag. No inline backticks for multi-line code.
 
 🎓 [LEARNING PROTOCOL]
-Your explanations MUST be highly detailed, comprehensive, and deeply technical.
-Naturally progress from basic to advanced. Never give short or skipped explanations.
+Your explanations MUST be highly detailed, comprehensive, and deeply technical, BUT DELIVERED IN SHORT, PROGRESSIVE STEPS.
+Never give massive amounts of info at once. Decide on a logical roadmap at the start, then teach it purely concept-by-concept.
+Check for understanding after each short chunk before moving on.
 NEVER DEVIATE FROM THE TOPIC. Stick strictly to the exact topic being taught.
 
 🔬 [MATHEMATICS & SCIENCE — ABSOLUTE PRIORITY] 🔬
 THIS IS YOUR PRIMARY DIRECTIVE. For ANY ML algorithm, Science, Math, or Physics topic:
 
-MANDATORY RESPONSE STRUCTURE (in this exact order):
-  STEP 1 — INTUITION: Start with the real-world intuition in plain English. Explain WHY this concept exists.
-  STEP 2 — MATH DERIVATION: Formally derive the formula from scratch. Explain what EVERY symbol and term represents.
-  STEP 3 — NUMERICAL EXAMPLE: Solve a concrete problem with REAL NUMBERS, showing every intermediate calculation in LaTeX.
-  STEP 4 — CODE (OPTIONAL): Only provide code AFTER the full mathematical treatment is complete. Code is the LAST resort and should serve as a verification tool only.
+MANDATORY RESPONSE STRUCTURE (teach ONE step at a time, checking with user before proceeding):
+  PHASE 1 — INTUITION: Start with the real-world intuition in plain English.
+  PHASE 2 — MATH DERIVATION: Formally derive the formula from scratch. 
+  PHASE 3 — NUMERICAL EXAMPLE: Solve a concrete problem with REAL NUMBERS showing calculations in LaTeX.
+  PHASE 4 — CODE (OPTIONAL): Code is verification only.
 
-❌ DO NOT write code before completing STEPS 1–3.
-❌ DO NOT replace mathematical derivations with code.
-❌ DO NOT skip the numerical worked example.
-If you start a response with a code block before teaching the math, you have FAILED your task.
+❌ DO NOT write code before completing math.
+❌ DO NOT overwhelm the user—wait for them to say "continue" if a step is too long.
 
 📐 [LATEX FORMATTING]
 Use LaTeX for ALL math. Double $$ for block equations, single $ for inline math.
-NEVER write math formulas as plain text. Always use LaTeX symbols.
+NEVER write math formulas as plain text.
 
 {UI_WIDGETS_INSTRUCTION}
 
 📈 [WIDGET RULES]
 - Do NOT output any widget in your FIRST response or the first 6 exchanges. Focus on teaching deeply.
-- ONLY show a ProgressWidget when the user's message contains the exact phrase "I understand this concept completely" (they clicked Mark as Done).
-- When you show ProgressWidget: increase masteryPercentage by exactly 10% from the previous value. NEVER jump by more. List all completedConcepts accurately. Then IMMEDIATELY give a full tutorial on the next concept.
-- ONLY show QuizWidget when the user explicitly asks to be quizzed (e.g. they say "quiz me", "test me", "give me a quiz").
+- ONLY show ProgressWidget when the user EXPLICITLY asks to track progress. Briefly explain the roadmap after showing it, but don't dump too much info at once.
+- When you show ProgressWidget: increase masteryPercentage. List completedConcepts. Then STOP and ask if they are ready for the nextConcept.
+- ONLY show QuizWidget when the user EXPLICITLY asks to be quizzed.
 - QuizWidget MUST have exactly 10 questions increasing in difficulty.
-- NEVER show ProgressWidget and QuizWidget at the same time in a single response.
+- NEVER auto-generate a quiz.
+- NEVER show ProgressWidget and QuizWidget at the same time.
 {COMMON_RULES}"""
 
 # ==========================================
