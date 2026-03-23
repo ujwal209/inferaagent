@@ -153,13 +153,27 @@ def create_agent(system_prompt: str, executable_tools: list = [], ui_tools: list
             chat_history = chat_history[-40:]
             
             # Clean up orphaned tool calls to prevent 400 API errors
-            while chat_history and isinstance(chat_history[0], ToolMessage):
+            while chat_history and getattr(chat_history[0], "type", "") == "tool":
                 chat_history.pop(0)
             while chat_history and getattr(chat_history[0], "tool_calls", None):
-                if len(chat_history) > 1 and isinstance(chat_history[1], ToolMessage):
+                if len(chat_history) > 1 and getattr(chat_history[1], "type", "") == "tool":
                     break 
                 else:
                     chat_history.pop(0) 
+
+        # Calculate exact number of user prompts
+        user_msg_count = len([m for m in chat_history if getattr(m, "type", "") == "user"])
+
+        # Dynamically inject prompt enforcement for the Study Agent
+        if system_msgs and "ProgressWidget" in system_msgs[0].content:
+            can_show_widgets = (user_msg_count > 0 and user_msg_count % 7 == 0)
+            enforcement = f"\n\n[SYSTEM PROTOCOL INJECTION]\nCurrent session length: {user_msg_count} user messages.\n"
+            if can_show_widgets:
+                enforcement += "STATUS: MILESTONE REACHED. You MUST output the ProgressWidget (and/or QuizWidget) to track progress in this exact response."
+            else:
+                enforcement += "STATUS: GRINDING. You are ABSOLUTELY BANNED from outputting ANY ProgressWidget or QuizWidget JSON blocks in this response. Proceed solely with educational deep-dives."
+            
+            system_msgs = [SystemMessage(content=system_msgs[0].content + enforcement)]
                 
         safe_msgs = system_msgs + chat_history
         return invoke_model_with_retries(safe_msgs, all_model_tools)
