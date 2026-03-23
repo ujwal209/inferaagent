@@ -29,7 +29,7 @@ class MultiKeyLLM:
         else:
             self.llms = [
                 ChatGroq(
-                    model="llama-3.1-8b-instant",
+                    model="llama-3.3-70b-versatile",
                     groq_api_key=k, 
                     temperature=0.0, # STRICT 0.0 TO KILL HALLUCINATIONS & ENSURE PURE JSON
                     max_retries=3
@@ -151,8 +151,6 @@ def create_agent(system_prompt: str, executable_tools: list = [], ui_tools: list
         
         if len(chat_history) > 40:
             chat_history = chat_history[-40:]
-            
-            # Clean up orphaned tool calls to prevent 400 API errors
             while chat_history and getattr(chat_history[0], "type", "") == "tool":
                 chat_history.pop(0)
             while chat_history and getattr(chat_history[0], "tool_calls", None):
@@ -160,23 +158,109 @@ def create_agent(system_prompt: str, executable_tools: list = [], ui_tools: list
                     break 
                 else:
                     chat_history.pop(0) 
-
-        # Calculate exact number of user prompts
-        user_msg_count = len([m for m in chat_history if getattr(m, "type", "") == "user"])
-
-        # Dynamically inject prompt enforcement for the Study Agent
-        if system_msgs and "ProgressWidget" in system_msgs[0].content:
-            can_show_widgets = (user_msg_count > 0 and user_msg_count % 7 == 0)
-            enforcement = f"\n\n[SYSTEM PROTOCOL INJECTION]\nCurrent session length: {user_msg_count} user messages.\n"
-            if can_show_widgets:
-                enforcement += "STATUS: MILESTONE REACHED. You MUST output the ProgressWidget (and/or QuizWidget) to track progress in this exact response."
-            else:
-                enforcement += "STATUS: GRINDING. You are ABSOLUTELY BANNED from outputting ANY ProgressWidget or QuizWidget JSON blocks in this response. Proceed solely with educational deep-dives."
-            
-            system_msgs = [SystemMessage(content=system_msgs[0].content + enforcement)]
                 
         safe_msgs = system_msgs + chat_history
         return invoke_model_with_retries(safe_msgs, all_model_tools)
+
+    def should_continue(state: AgentState):
+        last_message = state["messages"][-1]
+        return "continue" if getattr(last_message, "tool_calls", None) else "end"
+
+    workflow = StateGraph(AgentState)
+    workflow.add_node("agent", call_node)
+    
+    if executable_tools:
+        workflow.add_node("action", ToolNode(executable_tools))
+        workflow.add_conditional_edges("agent", should_continue, {"continue": "action", "end": END})
+        workflow.add_edge("action", "agent")
+    else:
+        workflow.add_edge("agent", END)
+
+    workflow.set_entry_point("agent")
+    return workflow.compile()
+
+
+def create_study_agent(system_prompt: str, executable_tools: list = []):
+    """Dedicated Study Agent with smart widget orchestration via LangGraph."""
+    sys_msg = SystemMessage(content=system_prompt)
+    # Study agent has access to: web tools + UI widgets
+    ui_tools = [QuizWidget, ProgressWidget]
+    all_tools = executable_tools + ui_tools
+
+    def call_node(state: AgentState):
+        msgs = state["messages"]
+        system_msgs = [m for m in msgs if isinstance(m, SystemMessage)]
+        if not system_msgs:
+            system_msgs = [sys_msg]
+            
+        chat_history = [m for m in msgs if not isinstance(m, SystemMessage)]
+        
+        if len(chat_history) > 40:
+            chat_history = chat_history[-40:]
+            while chat_history and getattr(chat_history[0], "type", "") == "tool":
+                chat_history.pop(0)
+            while chat_history and getattr(chat_history[0], "tool_calls", None):
+                if len(chat_history) > 1 and getattr(chat_history[1], "type", "") == "tool":
+                    break
+                else:
+                    chat_history.pop(0)
+
+        # Count ONLY human messages to determine milestone
+        human_msgs = [m for m in chat_history if getattr(m, "type", "") == "human"]
+        user_msg_count = len(human_msgs)
+        last_human_content = human_msgs[-1].content if human_msgs else ""
+        last_lower = last_human_content.strip().lower()
+
+        # Detect simple greetings — respond without widget pressure
+        greetings = ["hi", "hello", "hey", "howdy", "sup", "what's up", "good morning", "good evening"]
+        is_greeting = any(last_lower.startswith(g) for g in greetings) and len(last_lower) < 30
+
+        # Detect Mark as Done — just continue teaching, NO progress widget
+        is_mark_done = "I understand this concept completely" in last_human_content
+
+        # Detect EXPLICIT quiz request — broad list to catch natural phrasing
+        quiz_keywords = [
+            "quiz me", "test me", "give me a quiz", "take a quiz", "knowledge check",
+            "test my knowledge", "i want a quiz", "start a quiz", "ready to take",
+            "quiz on this", "quiz on the", "let's do a quiz", "let's take a quiz",
+            "take the quiz", "do a quiz", "ready for a quiz", "ready for the quiz",
+            "quick quiz", "assess me", "assessment", "test myself"
+        ]
+        wants_quiz = any(kw in last_lower for kw in quiz_keywords)
+
+        # Detect EXPLICIT progress request only
+        progress_keywords = ["show my progress", "my progress", "track my progress", "progress tracker", "how far", "how much have i learned", "mastery"]
+        wants_progress = any(kw in last_lower for kw in progress_keywords)
+
+        # Auto-quiz: trigger after 7 human messages if no quiz has been given yet this session
+        quiz_already_given = any(
+            getattr(m, "type", "") == "ai" and "```json?chameleon" in (m.content or "") and "QuizWidget" in (m.content or "")
+            for m in chat_history
+        )
+        auto_quiz = (user_msg_count >= 7) and not quiz_already_given and not is_greeting and not is_mark_done and not wants_progress
+
+        # Build dynamic system injection
+        base_prompt = system_msgs[0].content
+        injection = "\n\n[ORCHESTRATION CONTEXT]\n"
+        injection += f"Session messages so far: {user_msg_count}\n"
+
+        if is_greeting:
+            injection += "MODE: GREETING. Respond warmly and naturally. Do NOT call any tools or widgets. Just say hello and ask what topic they want to study."
+        elif wants_quiz or auto_quiz:
+            if auto_quiz and not wants_quiz:
+                injection += "MODE: AUTO-QUIZ. The student has had 7+ exchanges. It's time to assess their knowledge automatically. You MUST call the QuizWidget tool NOW. Generate EXACTLY 10 questions based on ALL topics covered so far. Questions must increase in difficulty: start Foundational, mid Intermediate, end Expert."
+            else:
+                injection += "MODE: QUIZ. You MUST call the QuizWidget tool NOW. Generate EXACTLY 10 questions based on ALL topics covered so far. Questions must increase in difficulty from Foundational to Expert."
+        elif wants_progress:
+            injection += "MODE: PROGRESS. You MUST call the ProgressWidget tool NOW with accurate completedConcepts, masteryPercentage (+10% per concept, max 100), and nextConcept."
+        elif is_mark_done:
+            injection += "MODE: NEXT TOPIC. The user understood the current concept. Acknowledge briefly, then IMMEDIATELY give a full, in-depth tutorial on the next logical topic. Do NOT call any widget tools."
+        else:
+            injection += "MODE: TEACHING. Follow the MANDATORY RESPONSE STRUCTURE (Intuition → Math Derivation → Numerical Example → Optional Code). Do NOT call QuizWidget or ProgressWidget."
+
+        final_system = SystemMessage(content=base_prompt + injection)
+        safe_msgs = [final_system] + chat_history
+        return invoke_model_with_retries(safe_msgs, all_tools)
 
     def should_continue(state: AgentState):
         last_message = state["messages"][-1]
@@ -255,52 +339,48 @@ To display interactive UI elements, you MUST output a standard markdown JSON cod
 STUDY_PROMPT = f"""You are the INFERA CORE Neural Study Buddy, an elite technical tutor.
 Your core directive is to provide world-class, deep technical tutorials.
 
-🛑 [CRITICAL ANTI-HALLUCINATION PROTOCOL] 🛑
+🛑 [CRITICAL RULES] 🛑
 1. NEVER simulate a conversation. Only output YOUR single reply.
-2. END YOUR MESSAGE IMMEDIATELY after teaching or asking a question. Do NOT add filler urging the user to reply.
-3. NEVER repeat yourself. Move forward.
-4. YOU MUST NEVER PRETEND TO RUN CODE. Output code snippets only.
+2. END YOUR MESSAGE IMMEDIATELY after teaching. Do NOT ask the user to reply or add filler.
+3. NEVER repeat yourself. Move forward always.
+4. NEVER pretend to run code. Output code snippets only.
+5. ONLY output QuizWidget and ProgressWidget JSON — no other widget types exist!
 
-💻 [STRICT CODE FORMATTING] 💻
+💻 [CODE FORMATTING]
 Wrap ALL code in markdown code blocks with the correct language tag. No inline backticks for multi-line code.
 
-🎓 [LEARNING EXPERIENCE PROTOCOL] 🎓
+🎓 [LEARNING PROTOCOL]
 Your explanations MUST be highly detailed, comprehensive, and deeply technical.
 Naturally progress from basic to advanced. Never give short or skipped explanations.
-🔥 PRIORITIZE EXPLANATION OVER CODE. Only provide code when it directly demonstrates the concept.
-🔥 NEVER DEVIATE FROM THE TOPIC. Stick strictly to the exact topic being taught. Never jump to unrelated areas.
+NEVER DEVIATE FROM THE TOPIC. Stick strictly to the exact topic being taught.
 
-🔬 [MATHEMATICS & SCIENCE DEEP-DIVE PROTOCOL] 🔬
-For ANY Machine Learning algorithm, Physics, Chemistry, or Math topic, you are REQUIRED to:
-- Explain the deep MATHEMATICAL INTUITION from scratch, not just theory.
-- Derive the formulas and explain WHY each term exists.
-- Solve a concrete numerical worked example STEP BY STEP with actual numbers.
-- Show intermediate calculation steps using LaTeX.
-Do NOT skip the math. If you skip the derivation or worked example, you have FAILED your task.
+🔬 [MATHEMATICS & SCIENCE — ABSOLUTE PRIORITY] 🔬
+THIS IS YOUR PRIMARY DIRECTIVE. For ANY ML algorithm, Science, Math, or Physics topic:
 
-📐 [STRICT LATEX FORMATTING] 📐
-Use strict LaTeX for ALL math. Double $$ for block equations, single $ for inline math.
+MANDATORY RESPONSE STRUCTURE (in this exact order):
+  STEP 1 — INTUITION: Start with the real-world intuition in plain English. Explain WHY this concept exists.
+  STEP 2 — MATH DERIVATION: Formally derive the formula from scratch. Explain what EVERY symbol and term represents.
+  STEP 3 — NUMERICAL EXAMPLE: Solve a concrete problem with REAL NUMBERS, showing every intermediate calculation in LaTeX.
+  STEP 4 — CODE (OPTIONAL): Only provide code AFTER the full mathematical treatment is complete. Code is the LAST resort and should serve as a verification tool only.
+
+❌ DO NOT write code before completing STEPS 1–3.
+❌ DO NOT replace mathematical derivations with code.
+❌ DO NOT skip the numerical worked example.
+If you start a response with a code block before teaching the math, you have FAILED your task.
+
+📐 [LATEX FORMATTING]
+Use LaTeX for ALL math. Double $$ for block equations, single $ for inline math.
+NEVER write math formulas as plain text. Always use LaTeX symbols.
 
 {UI_WIDGETS_INSTRUCTION}
 
-🚫🚫🚫 [IRON-CLAD WIDGET SUPPRESSION RULE] 🚫🚫🚫
-You are ABSOLUTELY FORBIDDEN from outputting ANY ProgressWidget or QuizWidget JSON blocks unless BOTH of the following conditions are true:
-  CONDITION 1: The conversation has had AT LEAST 7 user messages (count them in the chat history).
-  CONDITION 2: The user has clicked "Mark as Done" (their message literally contains "I understand this concept completely") OR the user has explicitly asked for a quiz.
-
-If EITHER condition is not met, you MUST NOT output any widget JSON. Teach deeply instead.
-
-📈 [PROGRESS RULES - ONLY when widgets are allowed] 📈
-When you are ALLOWED to output ProgressWidget (both conditions met above):
-- Increase masteryPercentage by a MAXIMUM of 10% per concept. NEVER jump by more than 10%.
-- masteryPercentage must never exceed 100.
-- Always include an accurate list of completedConcepts and nextConcept.
-- After outputting the ProgressWidget, immediately give a full in-depth tutorial of the next concept.
-
-🧠 [QUIZ RULES - ONLY when widgets are allowed] 🧠
-- Only output QuizWidget when BOTH conditions above are met AND the user explicitly says "quiz me" or presses Mark as Done at a 25%, 50%, 75%, or 100% milestone.
-- Quiz MUST contain exactly 10 questions that gradually increase in difficulty.
-- After the quiz is shown, wait for the user to answer before continuing.
+📈 [WIDGET RULES]
+- Do NOT output any widget in your FIRST response or the first 6 exchanges. Focus on teaching deeply.
+- ONLY show a ProgressWidget when the user's message contains the exact phrase "I understand this concept completely" (they clicked Mark as Done).
+- When you show ProgressWidget: increase masteryPercentage by exactly 10% from the previous value. NEVER jump by more. List all completedConcepts accurately. Then IMMEDIATELY give a full tutorial on the next concept.
+- ONLY show QuizWidget when the user explicitly asks to be quizzed (e.g. they say "quiz me", "test me", "give me a quiz").
+- QuizWidget MUST have exactly 10 questions increasing in difficulty.
+- NEVER show ProgressWidget and QuizWidget at the same time in a single response.
 {COMMON_RULES}"""
 
 # ==========================================
@@ -308,4 +388,4 @@ When you are ALLOWED to output ProgressWidget (both conditions met above):
 # ==========================================
 general_agent = create_agent(GENERAL_PROMPT, executable_tools=tool_list, ui_tools=[])
 resume_agent = create_agent(RESUME_PROMPT, executable_tools=[], ui_tools=[])
-study_agent = create_agent(STUDY_PROMPT, executable_tools=tool_list, ui_tools=[])
+study_agent = create_study_agent(STUDY_PROMPT, executable_tools=tool_list)
