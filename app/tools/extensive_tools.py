@@ -25,18 +25,19 @@ random.shuffle(TAVILY_KEYS)
 # DEEP URL SCRAPER (For Serper Links)
 # ==========================================
 def scrape_page(url: str) -> str:
-    """Visits a URL and extracts the raw text content for deep searching."""
+    """Visits a URL and aggressively extracts massive raw text content for deep searching."""
     try:
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
-        resp = requests.get(url, headers=headers, timeout=5)
+        resp = requests.get(url, headers=headers, timeout=8)
         if resp.status_code == 200:
             text = resp.text
             text = re.sub(r'<(script|style).*?>.*?</\1>', '', text, flags=re.DOTALL | re.IGNORECASE)
             text = re.sub(r'<[^>]+>', ' ', text)
             text = ' '.join(text.split())
-            return text[:1500] 
+            # MASSIVE DEEP SCRAPE: Pulled to 4000 characters for Perplexity-level context
+            return text[:4000] 
     except Exception:
         return ""
     return ""
@@ -49,7 +50,7 @@ class SerperSearcher:
         self.keys = keys
         self.current_index = 0
 
-    def search(self, query: str, num_results: int = 5) -> dict:
+    def search(self, query: str, num_results: int = 4) -> dict:
         if not self.keys:
             return {}
 
@@ -118,20 +119,25 @@ serper_engine = SerperSearcher(SERPER_KEYS)
 tavily_engine = TavilySearcher(TAVILY_KEYS)
 
 def _run_robust_search(query: str, max_results: int = 4) -> str:
-    print(f"\n🌐 [ROBUST SEARCH INITIATED] Query: '{query}'")
+    """Runs BOTH Serper and Tavily simultaneously and combines the results."""
+    print(f"\n🌐 [COMBINED DEEP SEARCH INITIATED] Query: '{query}'")
     
+    formatted_report = f"# 🔍 COMPREHENSIVE SEARCH INTELLIGENCE REPORT FOR '{query}'\n\n"
+    has_results = false
+    
+    # --- 1. FETCH SERPER (Google) ---
     if SERPER_KEYS:
         serper_data = serper_engine.search(query, num_results=max_results)
         organic_results = serper_data.get("organic", [])
         
         if organic_results:
-            print(f"✅ [SERPER HIT] Retrieved {len(organic_results)} organic results. Scraping pages...")
-            formatted = f"GOOGLE SEARCH REPORT FOR '{query}':\n\n"
+            has_results = True
+            print(f"✅ [SERPER HIT] Retrieved {len(organic_results)} organic results. Deep Scraping pages...")
+            formatted_report += "## 🌐 ENGINE 1: GOOGLE SEARCH (WITH DEEP SCRAPE)\n\n"
             
             if "answerBox" in serper_data and "snippet" in serper_data["answerBox"]:
-                formatted += f"### QUICK ANSWER:\n{serper_data['answerBox']['snippet']}\n\n"
+                formatted_report += f"**⚡ Quick Answer:** {serper_data['answerBox']['snippet']}\n\n"
                 
-            formatted += "### ORGANIC SEARCH RESULTS (WITH DEEP SCRAPE):\n"
             for i, r in enumerate(organic_results[:max_results], 1):
                 title = r.get('title', 'No Title')
                 link = r.get('link', 'No URL')
@@ -139,44 +145,49 @@ def _run_robust_search(query: str, max_results: int = 4) -> str:
                 page_content = scrape_page(link)
                 final_content = page_content if len(page_content) > 100 else snippet
                 
-                formatted += f"[{i}] TITLE: {title}\nURL: {link}\nEXTRACTED CONTENT: {final_content}\n{'-'*50}\n"
-            return formatted
+                formatted_report += f"### [Source {i}] {title}\n**URL:** {link}\n**Content:** {final_content}\n{'-'*50}\n\n"
 
+    # --- 2. FETCH TAVILY (AI Search) ---
     if TAVILY_KEYS:
         tavily_results, tavily_answer = tavily_engine.search(query, max_results=max_results)
         
         if tavily_results or tavily_answer:
+            has_results = True
             print(f"✅ [TAVILY HIT] Retrieved deep results.")
-            formatted = f"DEEP SEARCH REPORT FOR '{query}':\n\n"
+            formatted_report += "## 🧠 ENGINE 2: TAVILY DEEP SEARCH\n\n"
             
             if tavily_answer:
-                short_ans = tavily_answer[:500] + "..." if len(tavily_answer) > 500 else tavily_answer
-                formatted += f"### AI SUMMARY FROM WEB:\n{short_ans}\n\n### DEEP SCRAPED SOURCES:\n"
+                short_ans = tavily_answer[:1000] + "..." if len(tavily_answer) > 1000 else tavily_answer
+                formatted_report += f"**🤖 AI Web Summary:**\n{short_ans}\n\n"
                 
             for i, r in enumerate(tavily_results, 1):
+                # Offset the index so citations don't overlap with Serper
+                source_idx = i + max_results 
                 raw_url = r.get('url', '')
                 clean_url = raw_url.split("?utm_")[0].split("?ranMID=")[0].split("?couponCode=")[0]
                 content = r.get('raw_content') or r.get('content') or ''
                 content = " ".join(content.split())
-                if len(content) > 1500: content = content[:1500] + "..."
+                if len(content) > 4000: content = content[:4000] + "..."
                     
-                formatted += f"[{i}] SOURCE TITLE: {r.get('title')}\nURL: {clean_url}\nEXTRACTED PAGE CONTENT: {content}\n{'-'*50}\n"
-            return formatted
+                formatted_report += f"### [Source {source_idx}] {r.get('title')}\n**URL:** {clean_url}\n**Content:** {content}\n{'-'*50}\n\n"
             
-    return f"⚠️ No live results found for '{query}'. Both search engines failed or are missing API keys."
+    if not has_results:
+        return f"⚠️ No live results found for '{query}'. Both search engines failed or are missing API keys."
+        
+    return formatted_report
 
 # ==========================================
 # SCHEMAS & TOOLS
 # ==========================================
 class GeneralSearchInput(BaseModel):
-    keyword: str = Field(description="A specific Google Search query to find courses, salaries, college stats, or engineering news.")
+    keyword: str = Field(description="A highly specific Google Search query. You must use this to fetch live info.")
 
 class FounderInfoInput(BaseModel):
     query: str = Field(description="A short string describing your query. Just say 'founders' or 'team'.")
 
 @tool(args_schema=GeneralSearchInput)
 def web_search(keyword: str) -> str:
-    """Search the live internet using Google Search with Deep Scraping."""
+    """Search the live internet using Both Google Search & AI Search with Deep Scraping."""
     return _run_robust_search(keyword)
 
 _INFERA_CORE_INFO = """
