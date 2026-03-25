@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from app.controllers import agent_controller
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import logging
 from dotenv import load_dotenv
@@ -10,6 +11,15 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 app = FastAPI(title="AI Engineering Career Agent API")
+
+# 🚀 STEP 1: ENABLE CORS (Direct-to-Backend Refactor)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Include the router
 app.include_router(agent_controller.router, prefix="/api/v1")
