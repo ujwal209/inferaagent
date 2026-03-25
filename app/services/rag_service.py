@@ -27,7 +27,8 @@ cloudinary.config(
 
 # Safely grab the Supabase keys
 SUPABASE_URL = os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+# Now checks for 'SUPABASE_KEY' exactly as it is in your .env
+SUPABASE_KEY = os.getenv("SUPABASE_KEY") or os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
 if not SUPABASE_URL or not SUPABASE_KEY:
     logging.error("🚨 CRITICAL: Supabase URL or Key is missing from .env! RAG features are disabled.")
