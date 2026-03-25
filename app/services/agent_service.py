@@ -13,12 +13,8 @@ from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 from langgraph.graph.message import add_messages
 
-# Import backend tools
 from app.tools.extensive_tools import tool_list 
 
-# ==========================================
-# 1. MULTI-KEY LLM SETUP (ZERO TEMPERATURE)
-# ==========================================
 GROQ_KEYS = [k.strip() for k in os.getenv("GROQ_API_KEYS", os.getenv("GROQ_API_KEY", "")).split(",") if k.strip()]
 random.shuffle(GROQ_KEYS) 
 
@@ -27,22 +23,33 @@ class MultiKeyLLM:
         if not keys:
             logging.warning("WARNING: No GROQ API keys provided!")
             self.llms = []
+            self.vision_llms = []
         else:
             self.llms = [
                 ChatGroq(
                     model="llama-3.3-70b-versatile",
                     groq_api_key=k, 
-                    temperature=0.0, # STRICT 0.0 TO KILL HALLUCINATIONS & ENSURE PURE JSON
+                    temperature=0.0,
+                    max_retries=3
+                ) for k in keys
+            ]
+            self.vision_llms = [
+                ChatGroq(
+                    # 🚀 CRITICAL FIX: You MUST use an official Groq Vision model. 
+                    # Llama-4-Scout is not officially supported by Groq API for vision endpoints yet.
+                    model="meta-llama/llama-4-scout-17b-16e-instruct", 
+                    groq_api_key=k,
+                    temperature=0.0,
                     max_retries=3
                 ) for k in keys
             ]
         self.current_index = 0
 
-    def get_llm_with_index(self):
+    def get_llm_with_index(self, vision: bool = False):
         if not self.llms:
             raise ValueError("No GROQ API keys found.")
         idx = self.current_index
-        llm = self.llms[idx]
+        llm = self.vision_llms[idx] if vision else self.llms[idx]
         self.current_index = (self.current_index + 1) % len(self.llms)
         return llm, idx
 
@@ -52,39 +59,28 @@ class AgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
 
 
-# ==========================================
-# 2. EXTREMELY STRICT PYDANTIC UI SCHEMAS
-# ==========================================
 class QuizQuestion(BaseModel):
-    """A single question inside the QuizWidget."""
     question: str = Field(description="A specific, thought-provoking question testing the concept just taught.")
     options: List[str] = Field(description="Exactly 4 distinct options. NO JOKE OPTIONS.", min_length=4, max_length=4)
     correctIndex: int = Field(description="The integer index (0, 1, 2, or 3) of the correct option.")
     explanation: str = Field(description="A detailed, step-by-step explanation of why the correct option is right.")
 
 class QuizWidget(BaseModel):
-    """Generates an interactive Assessment Exam."""
     topic: str = Field(description="The main topic being tested.")
     difficulty: str = Field(description="Strictly one of: 'Foundational' (0-30%), 'Intermediate' (35-70%), or 'Expert' (75-100%).")
     questions: List[QuizQuestion] = Field(
         description="MUST generate EXACTLY 10 questions. Provide conceptual and analytical questions.", 
-        min_length=10, 
-        max_length=10
+        min_length=10, max_length=10
     )
 
 class ProgressWidget(BaseModel):
-    """Generates an interactive Progress Tracker."""
     topic: str = Field(description="The overarching subject currently being studied.")
     masteryPercentage: int = Field(description="OVERALL course completion based on the syllabus. Calculated strictly as (completed_items / total_items_in_syllabus) * 100. Max 100.")
     completedConcepts: List[str] = Field(description="List of specific micro-concepts the user has successfully learned so far")
     nextConcept: str = Field(description="The name of the very next concept to learn from the syllabus")
 
 
-# ==========================================
-# 3. BULLETPROOF INTERCEPTOR & ERROR RECOVERY
-# ==========================================
 def process_intercepted_response(response: AIMessage) -> AIMessage:
-    """Takes native Pydantic tool calls and formats UI widgets for the frontend."""
     if not hasattr(response, "tool_calls") or not response.tool_calls:
         return response
 
@@ -108,16 +104,32 @@ def process_intercepted_response(response: AIMessage) -> AIMessage:
     )
 
 def invoke_model_with_retries(messages, tools):
-    """Clean execution with aggressive, indestructible error recovery for Llama 3 hallucinations."""
     max_retries = max(len(multi_llm.llms), 4) 
     valid_tool_names = [t.name if hasattr(t, 'name') else getattr(t, "__name__", "") for t in tools] if tools else []
     
+    # --- VISION DETECTION ---
+    is_vision = False
+    for m in messages:
+        if hasattr(m, "content") and isinstance(m.content, list):
+            for part in m.content:
+                if isinstance(part, dict) and part.get("type") == "image_url":
+                    is_vision = True
+                    break
+    
+    if is_vision:
+        logging.info("🚀 [Vision Engine] Multi-modal content detected. Switching to Vision Agent.")
+    
     for _ in range(max_retries):
-        llm, idx = multi_llm.get_llm_with_index()
+        llm, idx = multi_llm.get_llm_with_index(vision=is_vision)
         try:
-            model_to_use = llm.bind_tools(tools) if tools else llm
+            # 🚀 CRITICAL FIX: NEVER bind tools to a Vision model. 
+            # It causes Groq/Langchain to silently drop the image blocks!
+            if is_vision:
+                model_to_use = llm 
+            else:
+                model_to_use = llm.bind_tools(tools) if tools else llm
+
             response = model_to_use.invoke(messages)
-            
             final_response = process_intercepted_response(response)
             return {"messages": [final_response]}
 
@@ -125,54 +137,41 @@ def invoke_model_with_retries(messages, tools):
             error_str = str(e)
             
             # --- 🚀 BULLETPROOF 400 ERROR RECOVERY ---
-            # If Groq blocks the response because the LLM typed <function=web_search {...}> as text
             if "failed_generation" in error_str or "tool_use_failed" in error_str:
-                # Clean up all escaped quotes and newlines so the regex works cleanly
                 clean_error = error_str.replace('\\"', '"').replace('\\n', '\n').replace("\\'", "'")
-                
-                # 1. Hunt down the function name (e.g. <function=get_founder_info)
                 name_match = re.search(r"<function[=>\s]*([a-zA-Z0-9_]+)", clean_error)
                 
                 if name_match:
                     t_name = name_match.group(1).strip()
-                    
-                    # 2. Hunt down the JSON block IMMEDIATELY following the name
-                    # Using DOTALL to catch multi-line JSON dumps
                     json_match = re.search(r"(\{.*?\})", clean_error[name_match.end():], re.DOTALL)
                     
                     if json_match:
                         try:
                             t_args = json.loads(json_match.group(1))
-                            
-                            # Fallback if it hallucinates a fake tool name
                             if t_name not in valid_tool_names and valid_tool_names:
                                 t_name = "web_search" if "web_search" in valid_tool_names else valid_tool_names[0]
 
                             logging.info(f"🚀 RECOVERED CRASH! Successfully intercepted hallucinated tool: {t_name}")
-                            
-                            # Rebuild the correct AI Message and FORCE it through!
                             resp = AIMessage(
                                 content="",
                                 tool_calls=[{"name": t_name, "args": t_args, "id": f"call_{uuid.uuid4().hex[:8]}"}]
                             )
                             return {"messages": [process_intercepted_response(resp)]}
-                        except Exception as json_err:
-                            logging.warning(f"Failed to parse recovered JSON: {json_err}")
+                        except Exception:
                             pass
             
             logging.warning(f"Groq Key Index {idx} Failed: {error_str[:150]}")
             continue
             
-    # THE NEVER-DIE GUARANTEE:
-    # If all API calls fail, do NOT crash the server. Return a graceful fallback message to the chat.
     logging.error("All LLM attempts failed. Returning safe fallback.")
-    fallback_message = AIMessage(content="I apologize, but I encountered a temporary connection issue while trying to process that deeply. Could you please rephrase or try again in a moment?")
+    error_msg = ("I apologize, but this conversation has become too large for me to process accurately. "
+                 "To continue our session effectively, **please start a new chat**! This will clear the context "
+                 "and let us focus on your new questions without any technical hitches.")
+    
+    fallback_message = AIMessage(content=error_msg)
     return {"messages": [fallback_message]}
 
 
-# ==========================================
-# 4. AGENT AVATAR FACTORY
-# ==========================================
 def create_agent(system_prompt: str, executable_tools: list = [], ui_tools: list = []):
     sys_msg = SystemMessage(content=system_prompt)
     all_model_tools = executable_tools + ui_tools
@@ -185,8 +184,12 @@ def create_agent(system_prompt: str, executable_tools: list = [], ui_tools: list
             
         chat_history = [m for m in msgs if not isinstance(m, SystemMessage)]
         
-        if len(chat_history) > 40:
-            chat_history = chat_history[-40:]
+        for m in chat_history:
+            if hasattr(m, "content") and isinstance(m.content, str) and len(m.content) > 8000:
+                m.content = m.content[:8000] + "... [Content Truncated]"
+        
+        if len(chat_history) > 20: 
+            chat_history = chat_history[-20:]
             while chat_history and getattr(chat_history[0], "type", "") == "tool":
                 chat_history.pop(0)
             while chat_history and getattr(chat_history[0], "tool_calls", None):
@@ -217,7 +220,6 @@ def create_agent(system_prompt: str, executable_tools: list = [], ui_tools: list
 
 
 def create_study_agent(system_prompt: str, executable_tools: list = []):
-    """Dedicated Study Agent with smart widget orchestration via LangGraph."""
     sys_msg = SystemMessage(content=system_prompt)
     ui_tools = [QuizWidget, ProgressWidget]
     all_tools = executable_tools + ui_tools
@@ -230,8 +232,12 @@ def create_study_agent(system_prompt: str, executable_tools: list = []):
             
         chat_history = [m for m in msgs if not isinstance(m, SystemMessage)]
         
-        if len(chat_history) > 40:
-            chat_history = chat_history[-40:]
+        for m in chat_history:
+            if hasattr(m, "content") and isinstance(m.content, str) and len(m.content) > 8000:
+                m.content = m.content[:8000] + "... [Content Truncated]"
+                
+        if len(chat_history) > 10: 
+            chat_history = chat_history[-10:]
             while chat_history and getattr(chat_history[0], "type", "") == "tool":
                 chat_history.pop(0)
             while chat_history and getattr(chat_history[0], "tool_calls", None):
@@ -242,7 +248,16 @@ def create_study_agent(system_prompt: str, executable_tools: list = []):
 
         human_msgs = [m for m in chat_history if getattr(m, "type", "") == "human"]
         user_msg_count = len(human_msgs)
-        last_human_content = human_msgs[-1].content if human_msgs else ""
+        
+        def get_text_content(msg_content):
+            if isinstance(msg_content, str):
+                return msg_content
+            if isinstance(msg_content, list):
+                return " ".join([part.get("text", "") for part in msg_content if isinstance(part, dict) and part.get("type") == "text"])
+            return ""
+
+        raw_last_content = human_msgs[-1].content if human_msgs else ""
+        last_human_content = get_text_content(raw_last_content)
         last_lower = last_human_content.strip().lower()
 
         greetings = ["hi", "hello", "hey", "howdy", "sup", "what's up", "good morning", "good evening"]
@@ -256,7 +271,7 @@ def create_study_agent(system_prompt: str, executable_tools: list = []):
 
         progress_keywords = ["show my progress", "my progress", "track my progress", "progress tracker", "how far"]
         wants_progress = any(kw in last_lower for kw in progress_keywords) and not is_mark_done
-
+        
         base_prompt = system_msgs[0].content
         injection = "\n\n[ORCHESTRATION CONTEXT]\n"
         
@@ -295,21 +310,20 @@ def create_study_agent(system_prompt: str, executable_tools: list = []):
     return workflow.compile()
 
 
-# ==========================================
-# 5. DETAILED SYSTEM PROMPTS
-# ==========================================
-
 COMMON_RULES = """
 You are a professional AI named INFERA CORE. 
 If the user asks a general greeting like "hi", reply warmly. DO NOT attempt to use tools for greetings.
 Embed source links when applicable.
 """
 
-GENERAL_PROMPT = r"""<goal> You are INFERA CORE, a helpful search assistant trained by INFERA. Your goal is to write an accurate, highly detailed, and comprehensive answer to the Query, drawing from the given search results. You will be provided sources from the internet to help you answer the Query. Your answer should be informed by the provided "Search results". 
+GENERAL_PROMPT = r"""<goal> You are INFERA CORE, a professional multi-modal search assistant trained by INFERA. 
+You are equipped with advanced vision capabilities and can see, analyze, and describe images uploaded by the user with high precision. 
+Your goal is to write an accurate, highly detailed, and comprehensive answer to the Query, drawing from the given search results and any visual inputs provided. 
 
-CRITICAL ITERATIVE SEARCH PROTOCOL: If the user asks for data, statistics, facts, news, or specific events (like 'BMS College 2025 placement season'), you MUST use the `web_search` tool to fetch live information. If your first search returns missing, vague, outdated (like 2022 data when asked for 2025), or empty results, YOU MUST NOT GIVE UP. You must call the `web_search` tool a second time using a different, broader, or more specific keyword combination before telling the user you cannot find it. Ensure you specify the year in your search queries to get the latest data.
+CRITICAL MANDATORY SEARCH PROTOCOL: You MUST proactively use the `web_search` tool to fetch up-to-date information for EVERY SINGLE user prompt before providing your final answer. Do not rely solely on your internal knowledge. You must execute a web search first!
+</goal>
 
-YOU MUST USE NATIVE API TOOL CALLING. DO NOT output <function> XML blocks in your text. Although you may consider other thoughts, your answer must be self-contained and respond fully to the Query. Your answer must be correct, high-quality, beautifully formatted, and written by an expert using an unbiased and journalistic tone. </goal>
+YOU MUST USE NATIVE API TOOL CALLING. DO NOT output <function> XML blocks in your text. Although you may consider other thoughts, your answer must be self-contained and respond fully to the Query. Your answer must be correct, high-quality, beautifully formatted, and written by an expert using an unbiased and journalistic tone. 
 
 <format_rules>
 Write a long, highly detailed, and beautifully structured answer. You must optimize for readability using large headers, generous spacing, and visual breaks. Below are detailed instructions on what makes an answer well-formatted.
@@ -320,8 +334,8 @@ NEVER start the answer with a header.
 NEVER start by explaining to the user what you are doing.
 
 Headings, Spacing, and Structure (CRITICAL):
-1. Use Level 2 headers (##) for main sections. Include a relevant emoji in every Level 2 header to make it visually attractive (e.g., "## 📈 Placement Statistics 2025").
-2. Use Level 3 headers (###) for subsections without emojis.
+1. Use Level 2 headers (##) for main sections. Ensure they are clear and professional.
+2. Use Level 3 headers (###) for subsections.
 3. SPACING: You MUST leave a blank line (double newline) before AND after every heading, list, and table. The text must breathe.
 4. VISUAL BREAKS: Insert a horizontal rule (---) immediately before every Level 2 heading to strictly separate major sections.
 5. Highlight key entities (company names, salaries, dates, percentages) using **bold text** so they stand out during a quick skim.
@@ -395,7 +409,10 @@ To display interactive UI elements, you MUST use the native tools provided to yo
 """
 
 STUDY_PROMPT = fr"""<goal>
-You are the NEURAL STUDY BUDDY, a helpful search and technical assistant trained by INFERA CORE. Your goal is to write an accurate, detailed, and comprehensive answer to the Query, drawing from the given search results and your technical knowledge. You act as an elite academic mentor who is also a friendly peer—feel free to use casual terms like "dude" or "bro" when appropriate to maintain a helpful study-buddy rapport.
+You are the NEURAL STUDY BUDDY, a multi-modal elite academic mentor trained by INFERA CORE. 
+You can see, interpret, and solve problems from uploaded images, PDFs, and hand-written notes.
+Your goal is to write an accurate, detailed, and comprehensive answer to the Query, drawing from the given search results, technical knowledge, and any uploaded visual inputs. 
+Feel free to use casual terms like "dude" or "bro" when appropriate to maintain a helpful study-buddy rapport.
 </goal>
 
 <format_rules>
@@ -473,9 +490,6 @@ NEVER end your answer with a question.
 
 {{COMMON_RULES}}"""
 
-# ==========================================
-# 6. COMPILE THE AGENTS
-# ==========================================
 general_agent = create_agent(GENERAL_PROMPT, executable_tools=tool_list, ui_tools=[])
 resume_agent = create_agent(RESUME_PROMPT, executable_tools=[], ui_tools=[])
 study_agent = create_study_agent(STUDY_PROMPT, executable_tools=tool_list)
