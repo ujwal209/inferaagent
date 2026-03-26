@@ -66,6 +66,38 @@ def get_gemini_embedding(text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> li
     raise Exception(f"All Gemini API keys failed! Last error: {last_error}")
 
 
+def extract_text_with_gemini(file_bytes: bytes, filename: str) -> str:
+    """Uses Gemini 1.5 Flash to extract text from a scanned document or image."""
+    if not GEMINI_API_KEYS:
+        return ""
+        
+    last_error = None
+    # Fallback loop: try keys until one works
+    for api_key in GEMINI_API_KEYS:
+        try:
+            client = genai.Client(api_key=api_key)
+            # Determine mime type
+            ext = filename.lower().split('.')[-1]
+            mime_type = "application/pdf"
+            if ext in ['png', 'webp', 'gif']: mime_type = f"image/{ext}"
+            elif ext in ['jpg', 'jpeg']: mime_type = "image/jpeg"
+            
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=[
+                    types.Part.from_bytes(data=file_bytes, mime_type=mime_type),
+                    "Please extract all the text from this document exactly as it appears. Provide only the extracted text without any commentary or headers."
+                ]
+            )
+            return response.text if response.text else ""
+        except Exception as e:
+            logging.warning(f"⚠️ Gemini OCR Key failed: {e}")
+            last_error = str(e)
+            
+    logging.error(f"Gemini OCR failed for {filename} after all keys: {last_error}")
+    return ""
+
+
 def upload_to_cloudinary(file_bytes: bytes, filename: str) -> str:
     """Uploads file to Cloudinary and returns the secure URL."""
     try:
@@ -99,6 +131,15 @@ def process_and_store_document(file_bytes: bytes, session_id: str, filename: str
         if ext == 'pdf':
             reader = PyPDF2.PdfReader(BytesIO(file_bytes))
             full_text = "".join(page.extract_text() for page in reader.pages)
+            
+            # 🚀 SCANNED PDF DETECTION: If PyPDF2 returns very little text, use Gemini OCR
+            if len(full_text.strip()) < 50:
+                logging.info(f"🔍 [RAG] PDF '{filename}' seems scanned. Invoking Gemini OCR...")
+                ocr_text = extract_text_with_gemini(file_bytes, filename)
+                if ocr_text:
+                    full_text = ocr_text
+                    logging.info(f"✅ [RAG] Successfully extracted {len(full_text)} chars via Gemini OCR.")
+
         elif ext in ['docx', 'doc']:
             doc = docx.Document(BytesIO(file_bytes))
             full_text = "\n".join([para.text for para in doc.paragraphs])
@@ -106,8 +147,8 @@ def process_and_store_document(file_bytes: bytes, session_id: str, filename: str
             prs = Presentation(BytesIO(file_bytes))
             for slide in prs.slides:
                 for shape in slide.shapes:
-                    if hasattr(shape, "text"):
-                        full_text += shape.text + "\n"
+                    if hasattr(shape, "text") and shape.text:
+                        full_text = (full_text or "") + shape.text + "\n"
         elif ext in ['txt', 'md', 'py', 'js', 'ts', 'json', 'csv']:
             full_text = file_bytes.decode('utf-8')
         else:
@@ -115,8 +156,14 @@ def process_and_store_document(file_bytes: bytes, session_id: str, filename: str
             return file_url
 
         if not full_text.strip():
-            logging.warning(f"Could not extract any text from {filename}. Skipping RAG.")
-            return file_url
+            # Final fallback: If it's an image or we still have nothing, try OCR one last time if it's not a common code/text file
+            if ext not in ['txt', 'md', 'py', 'js', 'ts', 'json', 'csv']:
+                logging.info(f"🔍 [RAG] No text found in {filename}. Final Gemini OCR attempt...")
+                full_text = extract_text_with_gemini(file_bytes, filename)
+            
+            if not full_text.strip():
+                logging.warning(f"Could not extract any text from {filename}. Skipping RAG.")
+                return file_url
 
         # 3. Break the text into chunks
         splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
